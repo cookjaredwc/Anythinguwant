@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bot Arena Online</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171b26;
+    --grid: #23273a;
+    --text: #e5e7eb;
+    --accent: #fbbf24;
+    --blue: #60a5fa;
+    --red: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    min-height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 16px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+  }
+  #stats {
+    display: flex;
+    gap: 20px;
+    font-size: 0.95rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #stats b { color: var(--accent); }
+  #stats .blue { color: var(--blue); }
+  #stats .red { color: var(--red); }
+  #share {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: #9ca3af;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 820px;
+  }
+  #share input {
+    background: var(--panel);
+    border: 1px solid var(--grid);
+    color: var(--accent);
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 0.8rem;
+    width: 320px;
+  }
+  button {
+    background: var(--accent);
+    color: #0f1117;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 5px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #build {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--grid);
+    border-radius: 8px;
+    padding: 14px;
+    width: 820px;
+    max-width: 96vw;
+  }
+  #build.show { display: flex; }
+  #build h3 { margin: 0; font-size: 1rem; color: var(--accent); letter-spacing: 0.08em; }
+  .slot {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    background: #12151f;
+    border: 1px solid var(--grid);
+    border-radius: 6px;
+    padding: 8px;
+  }
+  .slot select {
+    background: #1c2130;
+    color: var(--text);
+    border: 1px solid var(--grid);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 0.78rem;
+    max-width: 235px;
+  }
+  .slot .sstats { font-size: 0.75rem; color: #9ca3af; flex: 1; min-width: 190px; }
+  .slot .sstats .bad { color: var(--red); font-weight: 600; }
+  .slot .del {
+    background: #374151;
+    color: #e5e7eb;
+    padding: 4px 9px;
+  }
+  #totals { font-size: 0.9rem; }
+  #totals .bad { color: var(--red); font-weight: 600; }
+  #build-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #build-status { font-size: 0.85rem; color: #9ca3af; }
+  #board-wrap { position: relative; display: none; }
+  #board-wrap.show { display: block; }
+  canvas#game {
+    background: #0b0e15;
+    border: 2px solid var(--grid);
+    border-radius: 8px;
+    display: block;
+    max-width: 96vw;
+  }
+  #banner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(15, 17, 23, 0.82);
+    border-radius: 8px;
+    text-align: center;
+    padding: 16px;
+  }
+  #banner.show { display: flex; }
+  #banner h2 { margin: 0; font-size: 1.5rem; letter-spacing: 0.1em; }
+  #banner p { margin: 0; color: #9ca3af; }
+  #feed {
+    font-size: 0.8rem;
+    color: #9ca3af;
+    min-height: 1.1em;
+    max-width: 820px;
+    text-align: center;
+  }
+  #hint {
+    color: #6b7280;
+    font-size: 0.82rem;
+    text-align: center;
+    max-width: 820px;
+    margin: 0;
+  }
+  a { color: var(--blue); }
+</style>
+</head>
+<body>
+  <h1>BOT ARENA ONLINE</h1>
+  <div id="stats">
+    <div>Round <b id="st-round">1</b></div>
+    <div><span class="blue" id="st-nameA">Blue</span> <b id="st-winsA">0</b> — <b id="st-winsB">0</b> <span class="red" id="st-nameB">Red</span></div>
+    <div>Budget <b id="st-budget">$0</b></div>
+    <div>Weight limit <b id="st-weight">0</b></div>
+  </div>
+  <div id="share">
+    <span id="share-label">Invite link:</span>
+    <input id="share-input" readonly value="creating room...">
+    <button id="copy-btn">Copy</button>
+    <span id="net-status"></span>
+  </div>
+
+  <div id="build">
+    <h3 id="build-title">ASSEMBLE YOUR TEAM</h3>
+    <div id="slots"></div>
+    <div id="build-actions">
+      <button id="add-bot">+ Add Bot</button>
+      <span id="totals"></span>
+    </div>
+    <div id="build-actions">
+      <button id="ready-btn">READY FOR BATTLE</button>
+      <button id="ai-btn">FIGHT THE AI</button>
+      <span id="build-status"></span>
+    </div>
+  </div>
+
+  <div id="board-wrap">
+    <canvas id="game" width="800" height="500"></canvas>
+    <div id="banner">
+      <h2 id="banner-title"></h2>
+      <p id="banner-msg"></p>
+      <button id="banner-btn" style="display:none">Rematch</button>
+    </div>
+  </div>
+  <div id="feed"></div>
+  <p id="hint">Build bots from a chassis, plating, and weapon — stay under budget and team weight limit.
+  In battle your bots fight on their own; <b>drag a bot</b> to a spot to move it, onto an enemy to focus-fire, or click-release it to return to AI mode.
+  First to 3 round wins takes the match. Budget and weight limit grow every round.
+  &middot; <a href="index.html">play Mech Snake instead</a></p>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(function () {
+  // ===================== PART CATALOG (inspired by Bot Arena 3) =====================
+  const CH = [
+    { name: 'AKAUMIN DL2-100',  cost: 150, w: 5,  cap: 14, hp: 60,  speed: 70,  radius: 12 },
+    { name: 'AKAUMIN DL2-250',  cost: 340, w: 8,  cap: 20, hp: 100, speed: 60,  radius: 14 },
+    { name: 'KHACOR SMARTMOVE', cost: 520, w: 6,  cap: 16, hp: 80,  speed: 105, radius: 12 },
+    { name: 'XEROI CLR-Z050',   cost: 700, w: 13, cap: 30, hp: 170, speed: 45,  radius: 17 },
+  ];
+  const PL = [
+    { name: 'CHROMETEK LIGHT', cost: 100,  w: 2,  hp: 30 },
+    { name: 'SANTRIN AURO',    cost: 180,  w: 4,  hp: 60 },
+    { name: 'OVERWATCH R200',  cost: 320,  w: 6,  hp: 100 },
+    { name: 'GAIACORP LB-MK2', cost: 520,  w: 8,  hp: 150 },
+    { name: 'OVERWATCH R760',  cost: 760,  w: 10, hp: 210 },
+    { name: 'GAIACORP SC-RS',  cost: 1050, w: 12, hp: 290 },
+  ];
+  const WP = [
+    { name: 'ZINTEK LP',       cost: 100,  w: 3,  kind: 'bullet', dmg: 6,  range: 130, reload: 700,  acc: 0.85 },
+    { name: 'RAPTOR DT-01',    cost: 220,  w: 4,  kind: 'bullet', dmg: 5,  range: 120, reload: 380,  acc: 0.85 },
+    { name: 'RAPTOR DT-02',    cost: 420,  w: 5,  kind: 'bullet', dmg: 8,  range: 130, reload: 350,  acc: 0.88 },
+    { name: 'TORRIKA KJ-557',  cost: 500,  w: 6,  kind: 'bullet', dmg: 16, range: 190, reload: 900,  acc: 0.9 },
+    { name: 'DARSIJ A101-1',   cost: 650,  w: 5,  kind: 'laser',  dmg: 12, range: 230, reload: 800 },
+    { name: 'KEDRON SPKL-D4',  cost: 600,  w: 5,  kind: 'heal',   dmg: 10, range: 140, reload: 500 },
+    { name: 'TORRIKA KR-2',    cost: 800,  w: 8,  kind: 'bullet', dmg: 26, range: 200, reload: 950,  acc: 0.92 },
+    { name: 'PORANTIS R33',    cost: 950,  w: 10, kind: 'shell',  dmg: 40, range: 170, reload: 1600, acc: 0.8, aoe: 34 },
+    { name: 'THEMODIN CEREBUS',cost: 1200, w: 9,  kind: 'laser',  dmg: 24, range: 260, reload: 750 },
+  ];
+  const MAX_BOTS = 6;
+  const AW = 800, AH = 500;
+  const TICK = 1000 / 30;
+  const ROUND_TIME = 90;
+  const WINS_NEEDED = 3;
+
+  function budgetFor(round) { return 1600 + (round - 1) * 900; }
+  function weightFor(round) { return Math.min(110, 40 + (round - 1) * 10); }
+
+  // ===================== DOM =====================
+  const $ = id => document.getElementById(id);
+  const canvas = $('game'), ctx = canvas.getContext('2d');
+  const buildEl = $('build'), slotsEl = $('slots'), totalsEl = $('totals');
+  const boardWrap = $('board-wrap');
+  const banner = $('banner'), bannerTitle = $('banner-title'), bannerMsg = $('banner-msg'), bannerBtn = $('banner-btn');
+  const feedEl = $('feed');
+  const shareInput = $('share-input'), netStatus = $('net-status');
+
+  const params = new URLSearchParams(location.search);
+  const ROOM = params.get('room');
+  const IS_HOST = !ROOM;
+  const myName = 'Cmdr-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  // ===================== SHARED CLIENT STATE =====================
+  let myTeam = IS_HOST ? 'A' : null;   // 'A' | 'B' | 'S' (spectator)
+  let phase = 'build';                 // build | battle | matchover
+  let round = 1, wins = { A: 0, B: 0 };
+  let names = { A: IS_HOST ? myName : 'Blue', B: 'Red' };
+  let snap = null;                     // latest battle snapshot
+  let loadout = [{ c: 0, p: 0, w: 1 }];
+  let iAmReady = false;
+  let drag = null;                     // {id, x0, y0, x, y}
+
+  // ===================== LOADOUT MATH =====================
+  function slotInfo(s) {
+    const c = CH[s.c], p = PL[s.p], w = WP[s.w];
+    const load = p.w + w.w;
+    return {
+      cost: c.cost + p.cost + w.cost,
+      weight: c.w + p.w + w.w,
+      hp: c.hp + p.hp,
+      load, cap: c.cap,
+      overCap: load > c.cap,
+      speed: Math.max(20, Math.round(c.speed * (1 - 0.3 * Math.min(1, load / c.cap)))),
+    };
+  }
+
+  function loadoutTotals(lo) {
+    let cost = 0, weight = 0, overCap = false;
+    lo.forEach(s => {
+      const i = slotInfo(s);
+      cost += i.cost; weight += i.weight;
+      if (i.overCap) overCap = true;
+    });
+    return { cost, weight, overCap };
+  }
+
+  function validLoadout(lo, budget, wlimit) {
+    if (!Array.isArray(lo) || lo.length < 1 || lo.length > MAX_BOTS) return false;
+    for (const s of lo) {
+      if (!s || !CH[s.c] || !PL[s.p] || !WP[s.w]) return false;
+    }
+    const t = loadoutTotals(lo);
+    return t.cost <= budget && t.weight <= wlimit && !t.overCap;
+  }
+
+  // ===================== BUILD UI =====================
+  function optionText(part, extra) {
+    return part.name + ' — $' + part.cost + ' · w' + part.w + extra;
+  }
+
+  function renderBuild() {
+    slotsEl.innerHTML = '';
+    loadout.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'slot';
+      const mkSel = (arr, key, extraFn) => {
+        const sel = document.createElement('select');
+        arr.forEach((part, idx) => {
+          const o = document.createElement('option');
+          o.value = idx;
+          o.textContent = optionText(part, extraFn(part));
+          sel.appendChild(o);
+        });
+        sel.value = s[key];
+        sel.disabled = iAmReady;
+        sel.addEventListener('change', () => { s[key] = +sel.value; renderBuild(); });
+        return sel;
+      };
+      row.appendChild(mkSel(CH, 'c', p => ' · cap' + p.cap + ' · ' + p.hp + 'HP · spd' + p.speed));
+      row.appendChild(mkSel(PL, 'p', p => ' · +' + p.hp + 'HP'));
+      row.appendChild(mkSel(WP, 'w', p =>
+        p.kind === 'heal' ? ' · heals ' + p.dmg + ' · rng' + p.range
+        : ' · ' + p.dmg + 'dmg · rng' + p.range + ' · ' + (p.reload / 1000) + 's' + (p.kind === 'laser' ? ' · laser' : p.kind === 'shell' ? ' · AoE' : '')));
+      const info = slotInfo(s);
+      const st = document.createElement('span');
+      st.className = 'sstats';
+      st.innerHTML = info.hp + 'HP · spd' + info.speed + ' · weight ' + info.weight +
+        ' · mount <span class="' + (info.overCap ? 'bad' : '') + '">' + info.load + '/' + info.cap + '</span>' +
+        ' · $' + info.cost;
+      row.appendChild(st);
+      if (loadout.length > 1 && !iAmReady) {
+        const del = document.createElement('button');
+        del.className = 'del';
+        del.textContent = '✕';
+        del.addEventListener('click', () => { loadout.splice(i, 1); renderBuild(); });
+        row.appendChild(del);
+      }
+      slotsEl.appendChild(row);
+    });
+    const t = loadoutTotals(loadout);
+    const budget = budgetFor(round), wl = weightFor(round);
+    totalsEl.innerHTML =
+      'Cost <span class="' + (t.cost > budget ? 'bad' : '') + '">$' + t.cost + ' / $' + budget + '</span>' +
+      ' &nbsp;·&nbsp; Weight <span class="' + (t.weight > wl ? 'bad' : '') + '">' + t.weight + ' / ' + wl + '</span>' +
+      (t.overCap ? ' &nbsp;·&nbsp; <span class="bad">a chassis is over mount capacity!</span>' : '');
+    $('add-bot').disabled = loadout.length >= MAX_BOTS || iAmReady;
+    $('ready-btn').disabled = iAmReady || !validLoadout(loadout, budget, wl) || myTeam === 'S';
+    $('ready-btn').textContent = iAmReady ? 'WAITING...' : 'READY FOR BATTLE';
+    updateStats();
+  }
+
+  function updateStats() {
+    $('st-round').textContent = round;
+    $('st-winsA').textContent = wins.A;
+    $('st-winsB').textContent = wins.B;
+    $('st-nameA').textContent = esc(names.A) + (myTeam === 'A' ? ' (you)' : '');
+    $('st-nameB').textContent = esc(names.B) + (myTeam === 'B' ? ' (you)' : '');
+    $('st-budget').textContent = '$' + budgetFor(round);
+    $('st-weight').textContent = weightFor(round);
+  }
+
+  function showPhase(ph) {
+    phase = ph;
+    buildEl.classList.toggle('show', ph === 'build');
+    boardWrap.classList.toggle('show', ph !== 'build');
+    if (ph === 'build') { banner.classList.remove('show'); iAmReady = false; renderBuild(); }
+  }
+
+  function showBanner(title, msg, btn) {
+    bannerTitle.textContent = title;
+    bannerMsg.textContent = msg;
+    bannerBtn.style.display = btn ? '' : 'none';
+    if (btn) bannerBtn.textContent = btn;
+    banner.classList.add('show');
+  }
+
+  function addFeed(msg) {
+    feedEl.textContent = msg;
+  }
+
+  // ===================== NETWORKING =====================
+  let peer = null, hostConn = null;
+  const conns = new Map();       // host: peerId -> conn
+  const guestNames = new Map();  // host: peerId -> name
+  let challengerId = null;       // host: peerId of team B (null = AI or none)
+
+  function sendAll(msg) {
+    conns.forEach(c => { if (c.open) { try { c.send(msg); } catch (e) {} } });
+  }
+
+  function sendTo(id, msg) {
+    const c = conns.get(id);
+    if (c && c.open) { try { c.send(msg); } catch (e) {} }
+  }
+
+  function initHostNet() {
+    if (typeof Peer === 'undefined') {
+      shareInput.value = 'offline — networking unavailable';
+      netStatus.textContent = 'Solo vs AI only.';
+      return;
+    }
+    peer = new Peer('arena-' + Math.random().toString(36).slice(2, 8));
+    peer.on('open', id => {
+      shareInput.value = location.protocol === 'file:'
+        ? '?room=' + id
+        : location.origin + location.pathname + '?room=' + id;
+      if (location.protocol === 'file:') netStatus.textContent = '⚠ Host on a public URL (GitHub Pages) so friends can join.';
+    });
+    peer.on('connection', conn => {
+      conn.on('open', () => {
+        conns.set(conn.peer, conn);
+        guestNames.set(conn.peer, String((conn.metadata && conn.metadata.name) || 'Cmdr-' + conn.peer.slice(-4)).slice(0, 16));
+        let role = 'S';
+        if (!challengerId) {
+          challengerId = conn.peer;
+          role = 'B';
+          names.B = guestNames.get(conn.peer);
+          if (phase === 'build') hostReady.B = false; // they need to build
+          netStatus.textContent = 'Challenger linked: ' + names.B;
+          addFeed(names.B + ' entered the arena!');
+        } else {
+          netStatus.textContent = conns.size + ' connected (spectators watching).';
+        }
+        conn.send({ t: 'welcome', role, phase, round, wins, names, ready: hostReady });
+        sendAll({ t: 'meta', round, wins, names });
+        updateStats();
+        if (phase === 'build') sendAll({ t: 'phase', phase: 'build', round, wins, names });
+      });
+      conn.on('data', d => onHostData(conn.peer, d));
+      const drop = () => {
+        conns.delete(conn.peer);
+        guestNames.delete(conn.peer);
+        if (conn.peer === challengerId) {
+          challengerId = null;
+          names.B = 'Red';
+          addFeed('Challenger disconnected.');
+          if (phase === 'battle') endBattle(null, 'Opponent disconnected');
+          else { hostReady.B = false; sendAll({ t: 'meta', round, wins, names }); updateStats(); }
+          netStatus.textContent = 'Waiting for a challenger...';
+        }
+      };
+      conn.on('close', drop);
+      conn.on('error', drop);
+    });
+    peer.on('error', err => {
+      netStatus.textContent = 'Network error: ' + err.type + ' (solo vs AI still works).';
+    });
+  }
+
+  function initGuestNet() {
+    $('share-label').textContent = 'Joined room:';
+    shareInput.value = ROOM;
+    $('copy-btn').style.display = 'none';
+    $('ai-btn').style.display = 'none';
+    if (typeof Peer === 'undefined') {
+      showPhase('battle');
+      showBanner('LINK FAILED', 'Networking library failed to load — reload the page.', 'Reload');
+      return;
+    }
+    showPhase('battle');
+    showBanner('LINKING', 'Connecting to host...', null);
+    peer = new Peer();
+    peer.on('open', () => {
+      hostConn = peer.connect(ROOM, { reliable: true, metadata: { name: myName } });
+      hostConn.on('data', onGuestData);
+      hostConn.on('close', () => { showPhase('battle'); showBanner('LINK LOST', 'Host disconnected.', 'Reload'); });
+      hostConn.on('error', () => { showPhase('battle'); showBanner('LINK LOST', 'Connection error.', 'Reload'); });
+    });
+    peer.on('error', err => {
+      showPhase('battle');
+      showBanner('LINK FAILED', 'Could not reach room "' + ROOM + '" (' + err.type + ').', 'Reload');
+    });
+  }
+
+  // ===================== HOST: MATCH FLOW =====================
+  const hostReady = { A: false, B: false };
+  let vsAI = false;
+  let bots = [], bullets = [], beams = [], fxs = [];
+  let simInterval = null, battleTime = 0, botSeq = 0;
+  let aiThinkT = 0;
+
+  function hostStartBuild(resetMatch) {
+    if (resetMatch) { round = 1; wins = { A: 0, B: 0 }; }
+    hostReady.A = false;
+    hostReady.B = false;
+    vsAI = vsAI && !challengerId;
+    showPhase('build');
+    $('build-status').textContent = challengerId
+      ? 'Opponent: ' + names.B
+      : (vsAI ? 'Opponent: SCRAPYARD AI' : 'Share the invite link, or fight the AI.');
+    $('ai-btn').style.display = challengerId ? 'none' : '';
+    sendAll({ t: 'phase', phase: 'build', round, wins, names });
+    updateStats();
+  }
+
+  let loadouts = { A: null, B: null };
+
+  function onHostData(fromId, d) {
+    if (!d) return;
+    if (d.t === 'ready' && fromId === challengerId && phase === 'build') {
+      if (validLoadout(d.loadout, budgetFor(round), weightFor(round))) {
+        loadouts.B = d.loadout;
+        hostReady.B = true;
+        sendTo(fromId, { t: 'accepted' });
+        $('build-status').textContent = names.B + ' is ready!';
+        hostMaybeStart();
+      } else {
+        sendTo(fromId, { t: 'reject', reason: 'Loadout over budget/weight — rebuild.' });
+      }
+    } else if (d.t === 'cmd' && phase === 'battle' && fromId === challengerId) {
+      applyCmd('B', d);
+    }
+  }
+
+  function hostMaybeStart() {
+    const opponentReady = challengerId ? hostReady.B : vsAI;
+    if (hostReady.A && opponentReady) {
+      if (vsAI && !challengerId) loadouts.B = aiBuild();
+      startBattle();
+    }
+  }
+
+  function aiBuild() {
+    const budget = budgetFor(round), wl = weightFor(round);
+    const lo = [];
+    let cost = 0, weight = 0, healers = 0;
+    for (let n = 0; n < MAX_BOTS; n++) {
+      let bestSlot = null;
+      for (let tries = 0; tries < 25; tries++) {
+        const s = {
+          c: Math.floor(Math.random() * CH.length),
+          p: Math.floor(Math.random() * PL.length),
+          w: Math.floor(Math.random() * WP.length),
+        };
+        if (WP[s.w].kind === 'heal' && (healers >= 1 || n < 2)) continue;
+        const i = slotInfo(s);
+        if (i.overCap) continue;
+        if (cost + i.cost > budget || weight + i.weight > wl) continue;
+        if (!bestSlot || i.cost > slotInfo(bestSlot).cost) bestSlot = s;
+      }
+      if (!bestSlot) break;
+      const i = slotInfo(bestSlot);
+      cost += i.cost; weight += i.weight;
+      if (WP[bestSlot.w].kind === 'heal') healers++;
+      lo.push(bestSlot);
+    }
+    if (!lo.length) lo.push({ c: 0, p: 0, w: 0 });
+    return lo;
+  }
+
+  function makeBot(team, s, idx, count) {
+    const c = CH[s.c], p = PL[s.p], w = WP[s.w];
+    const i = slotInfo(s);
+    const spacing = AH / (count + 1);
+    return {
+      id: ++botSeq, team,
+      ci: s.c, pi: s.p, wi: s.w,
+      name: c.name.split(' ')[0] + '-' + (idx + 1),
+      x: team === 'A' ? 90 : AW - 90,
+      y: spacing * (idx + 1),
+      ang: team === 'A' ? 0 : Math.PI,
+      hp: i.hp, maxHp: i.hp,
+      speed: i.speed, radius: c.radius,
+      cd: 300 + Math.random() * 400,
+      ord: null, alive: true,
+    };
+  }
+
+  function startBattle() {
+    bots = []; bullets = []; beams = []; fxs = [];
+    battleTime = ROUND_TIME;
+    loadouts.A.forEach((s, i) => bots.push(makeBot('A', s, i, loadouts.A.length)));
+    loadouts.B.forEach((s, i) => bots.push(makeBot('B', s, i, loadouts.B.length)));
+    showPhase('battle');
+    banner.classList.remove('show');
+    sendAll({ t: 'phase', phase: 'battle', round, wins, names });
+    clearInterval(simInterval);
+    simInterval = setInterval(simTick, TICK);
+    addFeed('Round ' + round + ' — FIGHT!');
+  }
+
+  function applyCmd(team, d) {
+    const b = bots.find(x => x.id === d.id && x.team === team && x.alive);
+    if (!b) return;
+    if (d.kind === 'move' && typeof d.x === 'number') {
+      b.ord = { k: 'move', x: Math.max(20, Math.min(AW - 20, d.x)), y: Math.max(20, Math.min(AH - 20, d.y)) };
+    } else if (d.kind === 'attack') {
+      const t = bots.find(x => x.id === d.tid && x.alive && x.team !== team);
+      if (t) b.ord = { k: 'attack', tid: t.id };
+    } else if (d.kind === 'ai') {
+      b.ord = null;
+    }
+  }
+
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  function nearest(b, list) {
+    let best = null, bd = Infinity;
+    list.forEach(o => { const d = dist(b, o); if (d < bd) { bd = d; best = o; } });
+    return best;
+  }
+
+  function simTick() {
+    const dt = TICK / 1000;
+    battleTime -= dt;
+
+    // simple AI commander for vsAI: focus fire lowest-HP enemy
+    if (vsAI && !challengerId) {
+      aiThinkT -= dt;
+      if (aiThinkT <= 0) {
+        aiThinkT = 3;
+        const targets = bots.filter(b => b.alive && b.team === 'A').sort((a, b) => a.hp - b.hp);
+        if (targets.length) {
+          bots.filter(b => b.alive && b.team === 'B' && WP[b.wi].kind !== 'heal')
+            .forEach(b => { b.ord = { k: 'attack', tid: targets[0].id }; });
+        }
+      }
+    }
+
+    bots.forEach(b => {
+      if (!b.alive) return;
+      const W = WP[b.wi];
+      const enemies = bots.filter(o => o.alive && o.team !== b.team);
+      const allies = bots.filter(o => o.alive && o.team === b.team && o !== b);
+      let tgt = null, dest = null;
+
+      if (b.ord) {
+        if (b.ord.k === 'move') {
+          dest = b.ord;
+          if (dist(b, dest) < 8) b.ord = null;
+        } else if (b.ord.k === 'attack') {
+          const t = bots.find(x => x.id === b.ord.tid && x.alive);
+          if (t && t.team !== b.team) tgt = t;
+          else b.ord = null;
+        }
+      }
+
+      if (W.kind === 'heal') {
+        if (!tgt && (!b.ord || b.ord.k !== 'move')) {
+          const hurt = allies.filter(a => a.hp < a.maxHp)
+            .sort((x, y) => x.hp / x.maxHp - y.hp / y.maxHp)[0];
+          if (hurt) tgt = hurt;
+          else {
+            const buddy = nearest(b, allies);
+            if (buddy && dist(b, buddy) > 70) dest = buddy;
+          }
+        }
+      } else if (!tgt && !dest) {
+        tgt = nearest(b, enemies);
+      }
+
+      if (tgt && !dest && dist(b, tgt) > W.range * 0.85) dest = tgt;
+
+      if (dest) {
+        const dx = dest.x - b.x, dy = dest.y - b.y, d = Math.hypot(dx, dy);
+        if (d > 1) {
+          b.x += dx / d * b.speed * dt;
+          b.y += dy / d * b.speed * dt;
+          b.ang = Math.atan2(dy, dx);
+        }
+      } else if (tgt) {
+        b.ang = Math.atan2(tgt.y - b.y, tgt.x - b.x);
+      }
+
+      bots.forEach(o => {
+        if (o === b || !o.alive) return;
+        const dx = b.x - o.x, dy = b.y - o.y, d = Math.hypot(dx, dy);
+        const min = b.radius + o.radius + 2;
+        if (d > 0.01 && d < min) {
+          b.x += dx / d * (min - d) * 0.5;
+          b.y += dy / d * (min - d) * 0.5;
+        }
+      });
+      b.x = Math.max(20, Math.min(AW - 20, b.x));
+      b.y = Math.max(20, Math.min(AH - 20, b.y));
+
+      b.cd -= TICK;
+      if (tgt && b.cd <= 0) {
+        const d = dist(b, tgt);
+        if (W.kind === 'heal') {
+          if (tgt.team === b.team && d <= W.range && tgt.hp < tgt.maxHp) {
+            tgt.hp = Math.min(tgt.maxHp, tgt.hp + W.dmg);
+            beams.push({ x1: b.x, y1: b.y, x2: tgt.x, y2: tgt.y, kind: 'heal', ttl: 0.18 });
+            b.cd = W.reload;
+          }
+        } else if (tgt.team !== b.team && d <= W.range) {
+          if (W.kind === 'laser') {
+            tgt.hp -= W.dmg;
+            beams.push({ x1: b.x, y1: b.y, x2: tgt.x, y2: tgt.y, kind: 'laser', ttl: 0.14 });
+            fxs.push({ x: tgt.x, y: tgt.y, kind: 'spark', age: 0 });
+          } else {
+            const err = (1 - (W.acc || 0.85)) * (Math.random() - 0.5) * 0.9;
+            const a = Math.atan2(tgt.y - b.y, tgt.x - b.x) + err;
+            const sp = W.kind === 'shell' ? 180 : 280;
+            bullets.push({
+              x: b.x + Math.cos(a) * (b.radius + 4),
+              y: b.y + Math.sin(a) * (b.radius + 4),
+              vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              dmg: W.dmg, team: b.team, kind: W.kind,
+              aoe: W.aoe || 0, life: (W.range + 40) / sp,
+            });
+            fxs.push({ x: b.x + Math.cos(a) * (b.radius + 6), y: b.y + Math.sin(a) * (b.radius + 6), kind: 'flash', age: 0 });
+          }
+          b.cd = W.reload;
+        }
+      }
+    });
+
+    bullets = bullets.filter(bl => {
+      bl.x += bl.vx * dt;
+      bl.y += bl.vy * dt;
+      bl.life -= dt;
+      let hit = null;
+      for (const b of bots) {
+        if (!b.alive || b.team === bl.team) continue;
+        if (Math.hypot(b.x - bl.x, b.y - bl.y) < b.radius + 3) { hit = b; break; }
+      }
+      const expired = bl.life <= 0 || bl.x < 0 || bl.x > AW || bl.y < 0 || bl.y > AH;
+      if (hit || (expired && bl.kind === 'shell')) {
+        if (bl.kind === 'shell') {
+          fxs.push({ x: bl.x, y: bl.y, kind: 'boom', age: 0 });
+          bots.forEach(b => {
+            if (!b.alive || b.team === bl.team) return;
+            const d = Math.hypot(b.x - bl.x, b.y - bl.y);
+            if (d < bl.aoe + b.radius) b.hp -= bl.dmg * Math.max(0.35, 1 - d / (bl.aoe + b.radius));
+          });
+        } else if (hit) {
+          hit.hp -= bl.dmg;
+          fxs.push({ x: bl.x, y: bl.y, kind: 'spark', age: 0 });
+        }
+        return false;
+      }
+      return !expired;
+    });
+
+    bots.forEach(b => {
+      if (b.alive && b.hp <= 0) {
+        b.alive = false;
+        b.hp = 0;
+        fxs.push({ x: b.x, y: b.y, kind: 'boom', age: 0 });
+        const teamName = b.team === 'A' ? names.A : names.B;
+        addFeed(b.name + ' (' + teamName + ') destroyed!');
+        sendAll({ t: 'feed', msg: b.name + ' (' + teamName + ') destroyed!' });
+      }
+    });
+
+    beams.forEach(bm => bm.ttl -= dt);
+    beams = beams.filter(bm => bm.ttl > 0);
+    fxs.forEach(f => f.age += dt);
+    fxs = fxs.filter(f => f.age < 0.6);
+
+    const aAlive = bots.some(b => b.alive && b.team === 'A');
+    const bAlive = bots.some(b => b.alive && b.team === 'B');
+    if (!aAlive || !bAlive) {
+      endBattle(!aAlive && !bAlive ? null : (aAlive ? 'A' : 'B'), null);
+      return;
+    }
+    if (battleTime <= 0) {
+      const hpPct = team => bots.filter(b => b.team === team)
+        .reduce((s, b) => s + (b.alive ? b.hp / b.maxHp : 0), 0);
+      const a = hpPct('A'), bb = hpPct('B');
+      endBattle(a === bb ? null : (a > bb ? 'A' : 'B'), 'Time up — decided on remaining armor');
+      return;
+    }
+
+    broadcastSnap();
+  }
+
+  function buildSnap() {
+    return {
+      t: 'snap',
+      time: Math.max(0, Math.ceil(battleTime)),
+      bots: bots.map(b => [
+        b.id, b.team === 'A' ? 0 : 1,
+        Math.round(b.x), Math.round(b.y), +b.ang.toFixed(2),
+        Math.round(b.hp), b.maxHp, b.ci, b.pi, b.wi,
+        b.alive ? 1 : 0,
+        b.ord ? (b.ord.k === 'move' ? 1 : 2) : 0,
+        b.ord ? (b.ord.k === 'move' ? Math.round(b.ord.x) : b.ord.tid) : 0,
+        b.ord && b.ord.k === 'move' ? Math.round(b.ord.y) : 0,
+      ]),
+      bullets: bullets.map(bl => [Math.round(bl.x), Math.round(bl.y), bl.kind === 'shell' ? 1 : 0]),
+      beams: beams.map(bm => [Math.round(bm.x1), Math.round(bm.y1), Math.round(bm.x2), Math.round(bm.y2), bm.kind === 'heal' ? 1 : 0]),
+      fxs: fxs.map(f => [Math.round(f.x), Math.round(f.y), f.kind === 'boom' ? 1 : (f.kind === 'flash' ? 2 : 0), +f.age.toFixed(2)]),
+    };
+  }
+
+  function broadcastSnap() {
+    snap = buildSnap();
+    sendAll(snap);
+  }
+
+  function endBattle(winner, note) {
+    clearInterval(simInterval);
+    broadcastSnap();
+    let title, msg;
+    if (winner) {
+      wins[winner]++;
+      const wname = winner === 'A' ? names.A : names.B;
+      title = wname + ' WINS ROUND ' + round;
+      msg = note || '';
+    } else {
+      title = 'DRAW';
+      msg = note || 'Mutual destruction!';
+    }
+    const matchOver = wins.A >= WINS_NEEDED || wins.B >= WINS_NEEDED;
+    sendAll({ t: 'end', winner, wins, names, matchOver, note: msg });
+    if (matchOver) {
+      phase = 'matchover';
+      const champ = wins.A >= WINS_NEEDED ? names.A : names.B;
+      showBanner('🏆 ' + champ + ' WINS THE MATCH', wins.A + ' — ' + wins.B, 'Rematch');
+    } else {
+      showBanner(title, msg + ' — next round starting...', null);
+      round++;
+      setTimeout(() => { if (phase !== 'matchover') hostStartBuild(false); }, 3500);
+    }
+    updateStats();
+  }
+
+  // ===================== GUEST: DATA =====================
+  function onGuestData(d) {
+    if (!d) return;
+    if (d.t === 'welcome') {
+      myTeam = d.role;
+      round = d.round; wins = d.wins; names = d.names;
+      netStatus.textContent = myTeam === 'B'
+        ? 'You are the challenger, ' + myName + '!'
+        : 'Spectating — you\'ll join when a slot opens.';
+      if (d.phase === 'build') { banner.classList.remove('show'); showPhase('build'); }
+      else { showPhase('battle'); banner.classList.remove('show'); }
+      updateStats();
+    } else if (d.t === 'phase') {
+      round = d.round; wins = d.wins; names = d.names;
+      if (d.phase === 'build') showPhase('build');
+      else { showPhase('battle'); banner.classList.remove('show'); }
+      updateStats();
+    } else if (d.t === 'snap') {
+      snap = d;
+      if (phase !== 'battle') showPhase('battle');
+    } else if (d.t === 'end') {
+      wins = d.wins; names = d.names;
+      if (d.matchOver) {
+        phase = 'matchover';
+        const champ = wins.A >= WINS_NEEDED ? names.A : names.B;
+        showBanner('🏆 ' + champ + ' WINS THE MATCH', wins.A + ' — ' + wins.B + ' — waiting for host to rematch', null);
+      } else {
+        const title = d.winner ? ((d.winner === 'A' ? names.A : names.B) + ' WINS ROUND ' + round) : 'DRAW';
+        showBanner(title, (d.note || '') + ' — next round soon...', null);
+      }
+      updateStats();
+    } else if (d.t === 'accepted') {
+      $('build-status').textContent = 'Loadout locked in — waiting for opponent.';
+    } else if (d.t === 'reject') {
+      iAmReady = false;
+      $('build-status').textContent = d.reason;
+      renderBuild();
+    } else if (d.t === 'feed') {
+      addFeed(d.msg);
+    } else if (d.t === 'meta') {
+      round = d.round; wins = d.wins; names = d.names;
+      updateStats();
+    }
+  }
+
+  // ===================== BATTLE INPUT (drag commands, BA3-style) =====================
+  function canvasPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (AW / r.width), y: (e.clientY - r.top) * (AH / r.height) };
+  }
+
+  function myTeamIdx() { return myTeam === 'A' ? 0 : 1; }
+
+  function snapBotAt(p, teamIdx) {
+    if (!snap) return null;
+    let best = null, bd = 24;
+    snap.bots.forEach(b => {
+      if (!b[10]) return;
+      if (teamIdx !== null && b[1] !== teamIdx) return;
+      const d = Math.hypot(b[2] - p.x, b[3] - p.y);
+      if (d < bd) { bd = d; best = b; }
+    });
+    return best;
+  }
+
+  function sendCmd(cmd) {
+    if (IS_HOST) applyCmd('A', cmd);
+    else if (hostConn && hostConn.open) hostConn.send(Object.assign({ t: 'cmd' }, cmd));
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    if (phase !== 'battle' || myTeam === 'S' || !myTeam) return;
+    const p = canvasPos(e);
+    const b = snapBotAt(p, myTeamIdx());
+    if (b) drag = { id: b[0], x0: p.x, y0: p.y, x: p.x, y: p.y };
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (drag) { const p = canvasPos(e); drag.x = p.x; drag.y = p.y; }
+  });
+
+  window.addEventListener('mouseup', e => {
+    if (!drag) return;
+    const p = canvasPos(e);
+    const moved = Math.hypot(p.x - drag.x0, p.y - drag.y0) > 10;
+    if (!moved) {
+      sendCmd({ id: drag.id, kind: 'ai' });
+    } else {
+      const enemy = snapBotAt(p, myTeamIdx() === 0 ? 1 : 0);
+      if (enemy) sendCmd({ id: drag.id, kind: 'attack', tid: enemy[0] });
+      else sendCmd({ id: drag.id, kind: 'move', x: p.x, y: p.y });
+    }
+    drag = null;
+  });
+
+  // ===================== RENDERER =====================
+  const TEAM_COL = ['#60a5fa', '#f87171'];
+  const TEAM_DARK = ['#1d4ed8', '#b91c1c'];
+
+  function render() {
+    requestAnimationFrame(render);
+    if (phase === 'build') return;
+
+    ctx.fillStyle = '#10131c';
+    ctx.fillRect(0, 0, AW, AH);
+    ctx.strokeStyle = 'rgba(103,232,249,0.06)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= AW; x += 40) {
+      ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, AH); ctx.stroke();
+    }
+    for (let y = 0; y <= AH; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(AW, y + 0.5); ctx.stroke();
+    }
+    ctx.strokeStyle = '#2b3350';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, AW - 6, AH - 6);
+
+    if (!snap) return;
+
+    // order indicators for my bots
+    snap.bots.forEach(b => {
+      if (!b[10] || b[1] !== myTeamIdx() || !b[11]) return;
+      if (b[11] === 1) {
+        ctx.strokeStyle = 'rgba(74,222,128,0.5)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(b[2], b[3]); ctx.lineTo(b[12], b[13]); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeRect(b[12] - 4, b[13] - 4, 8, 8);
+      } else if (b[11] === 2) {
+        const t = snap.bots.find(x => x[0] === b[12]);
+        if (t) {
+          ctx.strokeStyle = 'rgba(248,113,113,0.5)';
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath(); ctx.moveTo(b[2], b[3]); ctx.lineTo(t[2], t[3]); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+    });
+
+    // beams
+    snap.beams.forEach(bm => {
+      ctx.strokeStyle = bm[4] ? 'rgba(74,222,128,0.8)' : 'rgba(103,232,249,0.85)';
+      ctx.lineWidth = bm[4] ? 2.5 : 3;
+      ctx.beginPath(); ctx.moveTo(bm[0], bm[1]); ctx.lineTo(bm[2], bm[3]); ctx.stroke();
+      ctx.lineWidth = 1;
+    });
+
+    // bots
+    snap.bots.forEach(b => {
+      const [id, ti, x, y, ang, hp, maxHp, ci, pi, wi, alive] = b;
+      if (!alive) {
+        ctx.fillStyle = 'rgba(75,85,99,0.35)';
+        ctx.beginPath(); ctx.arc(x, y, CH[ci].radius, 0, Math.PI * 2); ctx.fill();
+        return;
+      }
+      const r = CH[ci].radius;
+      // plating ring
+      ctx.strokeStyle = 'rgba(148,163,184,' + (0.25 + pi * 0.12) + ')';
+      ctx.lineWidth = 2 + pi * 0.8;
+      ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke();
+      // body
+      ctx.fillStyle = TEAM_COL[ti];
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = TEAM_DARK[ti];
+      ctx.beginPath(); ctx.arc(x, y, r * 0.55, 0, Math.PI * 2); ctx.fill();
+      // turret
+      const W = WP[wi];
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = W.kind === 'shell' ? 5 : (W.kind === 'laser' ? 2.5 : 3);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(ang) * (r + 8), y + Math.sin(ang) * (r + 8));
+      ctx.stroke();
+      if (W.kind === 'laser') {
+        ctx.fillStyle = '#67e8f9';
+        ctx.beginPath(); ctx.arc(x + Math.cos(ang) * (r + 8), y + Math.sin(ang) * (r + 8), 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+      if (W.kind === 'heal') {
+        ctx.strokeStyle = '#4ade80';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y);
+        ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4);
+        ctx.stroke();
+      }
+      // hp bar
+      const bw = r * 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(x - bw / 2, y - r - 10, bw, 4);
+      ctx.fillStyle = hp / maxHp > 0.4 ? '#4ade80' : (hp / maxHp > 0.2 ? '#fbbf24' : '#f87171');
+      ctx.fillRect(x - bw / 2, y - r - 10, bw * Math.max(0, hp / maxHp), 4);
+      // drag highlight
+      if (drag && drag.id === id) {
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, r + 6, 0, Math.PI * 2); ctx.stroke();
+      }
+    });
+
+    // bullets
+    snap.bullets.forEach(bl => {
+      ctx.fillStyle = bl[2] ? '#fbbf24' : '#e5e7eb';
+      ctx.beginPath(); ctx.arc(bl[0], bl[1], bl[2] ? 4 : 2, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // fx
+    snap.fxs.forEach(f => {
+      const [x, y, kind, age] = f;
+      if (kind === 1) {
+        const pr = age * 90;
+        ctx.globalAlpha = Math.max(0, 1 - age / 0.6);
+        ctx.strokeStyle = '#fb923c';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(x, y, 6 + pr, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath(); ctx.arc(x, y, Math.max(0, 10 - age * 20), 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (kind === 2 && age < 0.12) {
+        ctx.fillStyle = 'rgba(251,191,36,0.8)';
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+      } else if (kind === 0 && age < 0.25) {
+        ctx.fillStyle = 'rgba(229,231,235,' + (1 - age / 0.25) + ')';
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+      }
+    });
+
+    // drag line
+    if (drag) {
+      const overEnemy = snapBotAt({ x: drag.x, y: drag.y }, myTeamIdx() === 0 ? 1 : 0);
+      ctx.strokeStyle = overEnemy ? 'rgba(248,113,113,0.9)' : 'rgba(74,222,128,0.9)';
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 2;
+      const from = snap.bots.find(b => b[0] === drag.id);
+      if (from) {
+        ctx.beginPath(); ctx.moveTo(from[2], from[3]); ctx.lineTo(drag.x, drag.y); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    // timer
+    ctx.fillStyle = 'rgba(229,231,235,0.85)';
+    ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(snap.time + 's', AW / 2, 24);
+  }
+
+  // ===================== WIRING =====================
+  $('add-bot').addEventListener('click', () => {
+    if (loadout.length < MAX_BOTS) { loadout.push({ c: 0, p: 0, w: 1 }); renderBuild(); }
+  });
+
+  $('ready-btn').addEventListener('click', () => {
+    if (!validLoadout(loadout, budgetFor(round), weightFor(round))) return;
+    iAmReady = true;
+    renderBuild();
+    if (IS_HOST) {
+      loadouts.A = JSON.parse(JSON.stringify(loadout));
+      hostReady.A = true;
+      $('build-status').textContent = challengerId
+        ? 'Waiting for ' + names.B + '...'
+        : (vsAI ? 'Deploying AI opposition...' : 'Waiting for a challenger — share the link or fight the AI.');
+      hostMaybeStart();
+    } else {
+      hostConn && hostConn.open && hostConn.send({ t: 'ready', loadout });
+      $('build-status').textContent = 'Sending loadout...';
+    }
+  });
+
+  $('ai-btn').addEventListener('click', () => {
+    if (!IS_HOST || challengerId) return;
+    vsAI = true;
+    names.B = 'SCRAPYARD AI';
+    $('build-status').textContent = 'Opponent: SCRAPYARD AI — press READY to fight.';
+    updateStats();
+    hostMaybeStart();
+  });
+
+  bannerBtn.addEventListener('click', () => {
+    if (IS_HOST) {
+      if (phase === 'matchover') hostStartBuild(true);
+    } else {
+      location.reload();
+    }
+  });
+
+  $('copy-btn').addEventListener('click', () => {
+    shareInput.select();
+    navigator.clipboard.writeText(shareInput.value).then(() => {
+      $('copy-btn').textContent = 'Copied!';
+      setTimeout(() => { $('copy-btn').textContent = 'Copy'; }, 1500);
+    });
+  });
+
+  // ===================== BOOT =====================
+  if (IS_HOST) {
+    names.A = myName;
+    initHostNet();
+    hostStartBuild(true);
+  } else {
+    initGuestNet();
+  }
+  renderBuild();
+  updateStats();
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>

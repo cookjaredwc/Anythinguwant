@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Mech Snake</title>
+<title>Mech Snake Online</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -24,7 +24,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
+    gap: 10px;
     padding: 16px;
   }
   h1 {
@@ -39,9 +39,54 @@
     font-size: 1rem;
   }
   #hud span { color: var(--accent); font-weight: 600; }
-  #board-wrap {
-    position: relative;
+  #share {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: #9ca3af;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 660px;
   }
+  #share input {
+    background: #1a1d29;
+    border: 1px solid var(--grid);
+    color: var(--accent);
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 0.8rem;
+    width: 320px;
+  }
+  #share button {
+    background: var(--accent);
+    color: #0f1117;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #players {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    min-height: 1.2em;
+    max-width: 660px;
+  }
+  #players .prow { display: inline-flex; align-items: center; gap: 5px; }
+  #players .prow.me { color: #fff; font-weight: 600; }
+  #players .prow i {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  #board-wrap { position: relative; }
   canvas#game {
     background: #0b0e15;
     border: 2px solid var(--grid);
@@ -65,7 +110,7 @@
   #overlay.show { display: flex; }
   #overlay h2 { margin: 0; font-size: 1.4rem; letter-spacing: 0.1em; }
   #overlay p { margin: 0; color: #9ca3af; font-size: 0.9rem; }
-  button {
+  #overlay button {
     background: var(--accent);
     color: #0f1117;
     border: none;
@@ -75,22 +120,30 @@
     font-weight: 600;
     cursor: pointer;
   }
-  button:hover { filter: brightness(1.1); }
+  #overlay button:hover { filter: brightness(1.1); }
   #hint {
     color: #6b7280;
     font-size: 0.85rem;
     text-align: center;
-    max-width: 640px;
+    max-width: 660px;
+    margin: 0;
   }
 </style>
 </head>
 <body>
-  <h1>MECH SNAKE</h1>
+  <h1>MECH SNAKE ONLINE</h1>
   <div id="hud">
     <div>Score: <span id="score">0</span></div>
     <div>Kills: <span id="kills">0</span></div>
     <div>Best: <span id="best">0</span></div>
   </div>
+  <div id="share">
+    <span id="share-label">Invite link:</span>
+    <input id="share-input" readonly value="creating room...">
+    <button id="copy-btn">Copy</button>
+    <span id="net-status"></span>
+  </div>
+  <div id="players"></div>
   <div id="board-wrap">
     <canvas id="game" width="640" height="400"></canvas>
     <div id="overlay" class="show">
@@ -99,9 +152,10 @@
       <button id="start-btn">Engage</button>
     </div>
   </div>
-  <p id="hint">&larr; &rarr; or A/D to steer &middot; forward is automatic &middot; Space to pause &middot; R to restart<br>
-  Stab drones head-on with the sword &middot; your rear shield blocks pursuers &middot; don't let them touch your hull</p>
+  <p id="hint">&larr; &rarr; or A/D to steer &middot; forward is automatic &middot; anyone who opens your invite link joins the arena<br>
+  Stab drones head-on &middot; your rear shield blocks pursuers &middot; crashing into walls, hulls, or drones destroys you (you respawn)</p>
 
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 (function () {
   const canvas = document.getElementById('game');
@@ -113,6 +167,11 @@
   const overlayTitle = document.getElementById('overlay-title');
   const overlayMsg = document.getElementById('overlay-msg');
   const startBtn = document.getElementById('start-btn');
+  const shareInput = document.getElementById('share-input');
+  const shareLabel = document.getElementById('share-label');
+  const copyBtn = document.getElementById('copy-btn');
+  const netStatus = document.getElementById('net-status');
+  const playersEl = document.getElementById('players');
 
   const W = canvas.width, H = canvas.height;
   const COLS = 20, ROWS = 20;
@@ -120,12 +179,40 @@
   const NUM_RAYS = 320;
   const COLW = W / NUM_RAYS;
   const BEST_KEY = 'snake-best-score';
-  const ENEMY_MAX = 5;
+  const TICK_MS = 160;
+  const RESPAWN_TICKS = 19;
+  const ENEMY_MAX = 6;
+  const FOOD_COUNT = 2;
+  const HOST_ID = 'HOST';
+  const PALETTE = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#f87171', '#a78bfa', '#34d399', '#fb923c'];
 
-  let snake, dir, food, score, best, kills, running, paused, loopId, speedMs;
-  let enemies, enemyTickCounter, turnQueue;
-  let prevCam, curCam, prevAngle, curAngle, lastTickTime;
-  let flashes, swordThrustStart, shieldFlashStart;
+  const params = new URLSearchParams(location.search);
+  const ROOM = params.get('room');
+  const IS_HOST = !ROOM;
+  const myName = 'Pilot-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+
+  // --- shared client state (host & guests both render from this) ---
+  let stCur = null;
+  let stateTime = 0;
+  let myNetId = IS_HOST ? HOST_ID : null;
+  let myAlive = true, myRespawnIn = 0;
+  let score = 0, kills = 0, best = 0;
+  let prevCam = { x: COLS / 2, y: ROWS / 2 };
+  let curCam = { x: COLS / 2, y: ROWS / 2 };
+  let prevAngle = 0, curAngle = 0;
+  let flashes = [];
+  let swordThrustStart = -1e9, shieldFlashStart = -1e9;
+
+  // --- host simulation state ---
+  let players = new Map();
+  let enemies = [], foods = [];
+  let enemyTickCounter = 0;
+  let running = false, paused = false, intervalId = null;
+  let colorIdx = 0;
+
+  // --- networking ---
+  let peer = null, hostConn = null;
+  const conns = new Map();
 
   function loadBest() {
     return parseInt(localStorage.getItem(BEST_KEY) || '0', 10);
@@ -135,47 +222,31 @@
     localStorage.setItem(BEST_KEY, String(v));
   }
 
-  function randomCell() {
-    return {
-      x: Math.floor(Math.random() * COLS),
-      y: Math.floor(Math.random() * ROWS),
-    };
+  function normAng(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
   }
 
-  function placeFood() {
-    let cell;
-    do {
-      cell = randomCell();
-    } while (snake.some(s => s.x === cell.x && s.y === cell.y) ||
-             enemies.some(e => e.x === cell.x && e.y === cell.y));
-    food = cell;
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
   }
 
-  function reset() {
-    snake = [
-      { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) },
-      { x: Math.floor(COLS / 2) - 1, y: Math.floor(ROWS / 2) },
-      { x: Math.floor(COLS / 2) - 2, y: Math.floor(ROWS / 2) },
-    ];
-    dir = { x: 1, y: 0 };
-    turnQueue = [];
-    score = 0;
-    kills = 0;
-    speedMs = 170;
-    enemies = [];
-    enemyTickCounter = 0;
-    flashes = [];
-    swordThrustStart = -1e9;
-    shieldFlashStart = -1e9;
-    curCam = { x: snake[0].x + 0.5, y: snake[0].y + 0.5 };
-    prevCam = { x: curCam.x, y: curCam.y };
-    curAngle = Math.atan2(dir.y, dir.x);
-    prevAngle = curAngle;
-    lastTickTime = performance.now();
-    placeFood();
-    spawnEnemy();
-    spawnEnemy();
-    updateHud();
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  const rgbCache = {};
+  function colRgb(hex) {
+    let v = rgbCache[hex];
+    if (!v) {
+      v = rgbCache[hex] = [
+        parseInt(hex.slice(1, 3), 16),
+        parseInt(hex.slice(3, 5), 16),
+        parseInt(hex.slice(5, 7), 16),
+      ];
+    }
+    return v;
   }
 
   function updateHud() {
@@ -187,7 +258,12 @@
   function showOverlay(title, msg, btnLabel) {
     overlayTitle.textContent = title;
     overlayMsg.textContent = msg;
-    startBtn.textContent = btnLabel || 'Engage';
+    if (btnLabel) {
+      startBtn.textContent = btnLabel;
+      startBtn.style.display = '';
+    } else {
+      startBtn.style.display = 'none';
+    }
     overlay.classList.add('show');
   }
 
@@ -199,35 +275,139 @@
     flashes.push({ text, color, start: performance.now() });
   }
 
-  // --- enemies ---
+  // ===================== HOST SIMULATION =====================
 
-  function spawnEnemy() {
-    for (let i = 0; i < 30; i++) {
+  function randomCell() {
+    return {
+      x: Math.floor(Math.random() * COLS),
+      y: Math.floor(Math.random() * ROWS),
+    };
+  }
+
+  function occupiedSet() {
+    const occ = new Set();
+    players.forEach(p => {
+      if (p.alive) p.body.forEach(s => occ.add(s.x + ',' + s.y));
+    });
+    enemies.forEach(e => occ.add(e.x + ',' + e.y));
+    foods.forEach(f => occ.add(f.x + ',' + f.y));
+    return occ;
+  }
+
+  function placeFood() {
+    const occ = occupiedSet();
+    for (let i = 0; i < 60; i++) {
       const c = randomCell();
-      const farEnough = Math.abs(c.x - snake[0].x) + Math.abs(c.y - snake[0].y) >= 6;
-      const free = !snake.some(s => s.x === c.x && s.y === c.y) &&
-        (!food || c.x !== food.x || c.y !== food.y) &&
-        !enemies.some(e => e.x === c.x && e.y === c.y);
-      if (farEnough && free) {
-        enemies.push({ x: c.x, y: c.y });
+      if (!occ.has(c.x + ',' + c.y)) {
+        foods.push(c);
         return;
       }
     }
   }
 
+  const DIRS = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+
+  function spawnPlayer(p) {
+    const occ = occupiedSet();
+    for (let tries = 0; tries < 80; tries++) {
+      const d = DIRS[Math.floor(Math.random() * 4)];
+      const hx = 3 + Math.floor(Math.random() * (COLS - 6));
+      const hy = 3 + Math.floor(Math.random() * (ROWS - 6));
+      const cells = [
+        { x: hx, y: hy },
+        { x: hx - d.x, y: hy - d.y },
+        { x: hx - 2 * d.x, y: hy - 2 * d.y },
+      ];
+      const blocked = cells.some(c =>
+        c.x < 0 || c.x >= COLS || c.y < 0 || c.y >= ROWS || occ.has(c.x + ',' + c.y));
+      const nearEnemy = enemies.some(e => Math.abs(e.x - hx) + Math.abs(e.y - hy) < 5);
+      if (!blocked && !nearEnemy) {
+        p.body = cells;
+        p.dir = { x: d.x, y: d.y };
+        p.turnQueue = [];
+        p.alive = true;
+        p.respawnIn = 0;
+        return;
+      }
+    }
+    p.body = [
+      { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) },
+      { x: Math.floor(COLS / 2) - 1, y: Math.floor(ROWS / 2) },
+      { x: Math.floor(COLS / 2) - 2, y: Math.floor(ROWS / 2) },
+    ];
+    p.dir = { x: 1, y: 0 };
+    p.turnQueue = [];
+    p.alive = true;
+    p.respawnIn = 0;
+  }
+
+  function addPlayer(id, name) {
+    if (players.has(id)) return;
+    const p = {
+      id,
+      name: String(name || 'Pilot-' + id.slice(-4)).slice(0, 16),
+      color: PALETTE[colorIdx++ % PALETTE.length],
+      score: 0,
+      kills: 0,
+      alive: false,
+      respawnIn: 0,
+      body: [],
+      dir: { x: 1, y: 0 },
+      turnQueue: [],
+    };
+    players.set(id, p);
+    spawnPlayer(p);
+  }
+
+  function removePlayer(id) {
+    players.delete(id);
+  }
+
+  function queueTurn(id, t) {
+    const p = players.get(id);
+    if (p && p.alive && p.turnQueue.length < 2 && (t === 'L' || t === 'R')) {
+      p.turnQueue.push(t);
+    }
+  }
+
+  function killPlayer(p, evts) {
+    p.alive = false;
+    p.body = [];
+    p.respawnIn = RESPAWN_TICKS;
+    evts.push({ id: p.id, k: 'death' });
+  }
+
+  function spawnEnemy() {
+    const occ = occupiedSet();
+    const heads = [...players.values()].filter(p => p.alive).map(p => p.body[0]);
+    for (let i = 0; i < 40; i++) {
+      const c = randomCell();
+      if (occ.has(c.x + ',' + c.y)) continue;
+      if (heads.some(h => Math.abs(c.x - h.x) + Math.abs(c.y - h.y) < 6)) continue;
+      enemies.push(c);
+      return;
+    }
+  }
+
   function maybeSpawnEnemy() {
-    if (enemies.length < ENEMY_MAX && Math.random() < 0.03) {
+    if (enemies.length < ENEMY_MAX && Math.random() < 0.04) {
       spawnEnemy();
     }
   }
 
-  function moveEnemies(target) {
+  function moveEnemies() {
+    const heads = [...players.values()].filter(p => p.alive).map(p => p.body[0]);
     const occupied = new Set(enemies.map(e => e.x + ',' + e.y));
     enemies.forEach(e => {
       let dx = 0, dy = 0;
-      if (Math.random() < 0.15) {
-        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-        [dx, dy] = dirs[Math.floor(Math.random() * dirs.length)];
+      let target = null, bestD = Infinity;
+      heads.forEach(h => {
+        const d = Math.abs(h.x - e.x) + Math.abs(h.y - e.y);
+        if (d < bestD) { bestD = d; target = h; }
+      });
+      if (!target || Math.random() < 0.15) {
+        const d = DIRS[Math.floor(Math.random() * 4)];
+        dx = d.x; dy = d.y;
       } else {
         const ddx = target.x - e.x;
         const ddy = target.y - e.y;
@@ -247,118 +427,307 @@
     });
   }
 
-  function resolveEnemyCollisions(headPos) {
-    const backCell = { x: headPos.x - dir.x, y: headPos.y - dir.y };
-    const survivors = [];
-    for (const e of enemies) {
-      if (e.x === headPos.x && e.y === headPos.y) {
-        score += 15;
-        kills++;
-        swordThrustStart = performance.now();
-        addFlash('SKEWERED +15', '#f87171');
-        continue;
-      }
-      if (e.x === backCell.x && e.y === backCell.y) {
-        score += 5;
-        kills++;
-        shieldFlashStart = performance.now();
-        addFlash('BLOCKED +5', '#67e8f9');
-        continue;
-      }
-      if (snake.some((s, i) => i > 0 && s.x === e.x && s.y === e.y)) {
-        gameOver();
-        return;
-      }
-      survivors.push(e);
-    }
-    enemies = survivors;
-    if (score > best) {
-      best = score;
-      saveBest(best);
-    }
-    updateHud();
-  }
-
-  // --- game loop ---
-
   function step() {
-    prevAngle = curAngle;
-    prevCam = { x: curCam.x, y: curCam.y };
+    const evts = [];
 
-    const turn = turnQueue.shift();
-    if (turn === 'L') { dir = { x: dir.y, y: -dir.x }; curAngle -= Math.PI / 2; }
-    else if (turn === 'R') { dir = { x: -dir.y, y: dir.x }; curAngle += Math.PI / 2; }
+    players.forEach(p => {
+      if (!p.alive) {
+        p.respawnIn--;
+        if (p.respawnIn <= 0) spawnPlayer(p);
+      }
+    });
 
-    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+    const alive = [...players.values()].filter(p => p.alive && p.body.length);
 
-    if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS ||
-        snake.some(s => s.x === head.x && s.y === head.y)) {
-      gameOver();
-      return;
-    }
+    alive.forEach(p => {
+      const t = p.turnQueue.shift();
+      if (t === 'L') p.dir = { x: p.dir.y, y: -p.dir.x };
+      else if (t === 'R') p.dir = { x: -p.dir.y, y: p.dir.x };
+      p.nextHead = { x: p.body[0].x + p.dir.x, y: p.body[0].y + p.dir.y };
+    });
 
-    snake.unshift(head);
-    curCam = { x: head.x + 0.5, y: head.y + 0.5 };
-    lastTickTime = performance.now();
+    const occ = new Set();
+    alive.forEach(p => p.body.forEach(s => occ.add(s.x + ',' + s.y)));
+    const headCells = new Map();
+    alive.forEach(p => {
+      const k = p.nextHead.x + ',' + p.nextHead.y;
+      headCells.set(k, (headCells.get(k) || 0) + 1);
+    });
+
+    alive.forEach(p => {
+      const h = p.nextHead;
+      const k = h.x + ',' + h.y;
+      if (h.x < 0 || h.x >= COLS || h.y < 0 || h.y >= ROWS ||
+          occ.has(k) || headCells.get(k) > 1) {
+        killPlayer(p, evts);
+      }
+    });
+
+    alive.filter(p => p.alive).forEach(p => {
+      const h = p.nextHead;
+      const ei = enemies.findIndex(e => e.x === h.x && e.y === h.y);
+      if (ei >= 0) {
+        enemies.splice(ei, 1);
+        p.score += 15;
+        p.kills++;
+        evts.push({ id: p.id, k: 'stab' });
+      }
+      p.body.unshift({ x: h.x, y: h.y });
+      const fi = foods.findIndex(f => f.x === h.x && f.y === h.y);
+      if (fi >= 0) {
+        foods.splice(fi, 1);
+        p.score += 10;
+        evts.push({ id: p.id, k: 'energy' });
+        placeFood();
+      } else {
+        p.body.pop();
+      }
+    });
 
     enemyTickCounter++;
-    if (enemyTickCounter % 2 === 0) {
-      moveEnemies(head);
+    if (enemyTickCounter % 2 === 0) moveEnemies();
+
+    const stillAlive = [...players.values()].filter(p => p.alive && p.body.length);
+    const survivors = [];
+    for (const e of enemies) {
+      let killed = false;
+      for (const p of stillAlive) {
+        if (!p.alive) continue;
+        const back = { x: p.body[0].x - p.dir.x, y: p.body[0].y - p.dir.y };
+        if (e.x === back.x && e.y === back.y) {
+          p.score += 5;
+          p.kills++;
+          evts.push({ id: p.id, k: 'block' });
+          killed = true;
+          break;
+        }
+        if (e.x === p.body[0].x && e.y === p.body[0].y) {
+          p.score += 15;
+          p.kills++;
+          evts.push({ id: p.id, k: 'stab' });
+          killed = true;
+          break;
+        }
+      }
+      if (!killed) {
+        const victim = stillAlive.find(p =>
+          p.alive && p.body.some((s, i) => i > 0 && s.x === e.x && s.y === e.y));
+        if (victim) killPlayer(victim, evts);
+        survivors.push(e);
+      }
     }
+    enemies = survivors;
+    maybeSpawnEnemy();
 
-    resolveEnemyCollisions(head);
-    if (!running) return;
+    broadcast(evts);
+  }
 
-    if (head.x === food.x && head.y === food.y) {
-      score += 10;
+  function buildState(evts) {
+    return {
+      type: 'state',
+      tickMs: TICK_MS,
+      snakes: [...players.values()].map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        alive: p.alive,
+        respawnIn: p.respawnIn,
+        score: p.score,
+        kills: p.kills,
+        dir: [p.dir.x, p.dir.y],
+        body: p.body.map(s => [s.x, s.y]),
+      })),
+      enemies: enemies.map(e => [e.x, e.y]),
+      foods: foods.map(f => [f.x, f.y]),
+      events: evts || [],
+    };
+  }
+
+  function broadcast(evts) {
+    const st = buildState(evts);
+    conns.forEach(c => {
+      if (c.open) {
+        try { c.send(st); } catch (err) { /* dropped */ }
+      }
+    });
+    applyState(st);
+  }
+
+  function resetMatch() {
+    enemies = [];
+    foods = [];
+    enemyTickCounter = 0;
+    players.forEach(p => {
+      p.score = 0;
+      p.kills = 0;
+      spawnPlayer(p);
+    });
+    for (let i = 0; i < FOOD_COUNT; i++) placeFood();
+    spawnEnemy();
+    spawnEnemy();
+  }
+
+  function startMatch() {
+    resetMatch();
+    running = true;
+    paused = false;
+    hideOverlay();
+    clearInterval(intervalId);
+    intervalId = setInterval(step, TICK_MS);
+    broadcast([]);
+  }
+
+  function togglePause() {
+    if (!IS_HOST || !running || conns.size > 0) return;
+    paused = !paused;
+    if (paused) {
+      clearInterval(intervalId);
+      showOverlay('SYSTEMS PAUSED', 'Press Space to resume', 'Resume');
+    } else {
+      hideOverlay();
+      intervalId = setInterval(step, TICK_MS);
+    }
+  }
+
+  // ===================== NETWORKING =====================
+
+  function initHostNet() {
+    if (typeof Peer === 'undefined') {
+      shareInput.value = 'offline — networking library failed to load';
+      netStatus.textContent = 'Solo mode only.';
+      return;
+    }
+    const rid = 'mech-' + Math.random().toString(36).slice(2, 8);
+    peer = new Peer(rid);
+    peer.on('open', id => {
+      if (location.protocol === 'file:') {
+        shareInput.value = '?room=' + id;
+        netStatus.textContent = '⚠ Host this file on a public URL (e.g. GitHub Pages) so friends can join.';
+      } else {
+        shareInput.value = location.origin + location.pathname + '?room=' + id;
+        netStatus.textContent = 'Room open.';
+      }
+    });
+    peer.on('connection', conn => {
+      conn.on('open', () => {
+        conns.set(conn.peer, conn);
+        addPlayer(conn.peer, conn.metadata && conn.metadata.name);
+        netStatus.textContent = conns.size + ' pilot(s) linked in.';
+        if (!running) conn.send({ type: 'waiting' });
+        else conn.send(buildState([]));
+      });
+      conn.on('data', d => {
+        if (d && d.type === 'turn') queueTurn(conn.peer, d.dir);
+      });
+      const drop = () => {
+        conns.delete(conn.peer);
+        removePlayer(conn.peer);
+        netStatus.textContent = conns.size + ' pilot(s) linked in.';
+      };
+      conn.on('close', drop);
+      conn.on('error', drop);
+    });
+    peer.on('error', err => {
+      netStatus.textContent = 'Network error: ' + err.type + ' (solo still works).';
+    });
+  }
+
+  function initGuestNet() {
+    shareLabel.textContent = 'Joined room:';
+    shareInput.value = ROOM;
+    copyBtn.style.display = 'none';
+    if (typeof Peer === 'undefined') {
+      showOverlay('LINK FAILED', 'Networking library failed to load. Check your connection and reload.', 'Reload');
+      return;
+    }
+    showOverlay('LINKING', 'Connecting to host...', null);
+    peer = new Peer();
+    peer.on('open', pid => {
+      myNetId = pid;
+      hostConn = peer.connect(ROOM, { reliable: true, metadata: { name: myName } });
+      hostConn.on('open', () => {
+        netStatus.textContent = 'Linked to host as ' + myName + '.';
+      });
+      hostConn.on('data', d => {
+        if (!d) return;
+        if (d.type === 'state') {
+          hideOverlay();
+          applyState(d);
+        } else if (d.type === 'waiting') {
+          showOverlay('STANDBY', 'Linked — waiting for host to engage...', null);
+        }
+      });
+      hostConn.on('close', () => {
+        showOverlay('LINK LOST', 'Host disconnected.', 'Reload');
+      });
+      hostConn.on('error', () => {
+        showOverlay('LINK LOST', 'Connection error.', 'Reload');
+      });
+    });
+    peer.on('error', err => {
+      showOverlay('LINK FAILED', 'Could not reach room "' + ROOM + '" (' + err.type + '). Check the link and reload.', 'Reload');
+    });
+  }
+
+  function sendTurn(t) {
+    if (IS_HOST) queueTurn(HOST_ID, t);
+    else if (hostConn && hostConn.open) hostConn.send({ type: 'turn', dir: t });
+  }
+
+  // ===================== CLIENT STATE / CAMERA =====================
+
+  function applyState(st) {
+    stCur = st;
+    stateTime = performance.now();
+    const me = st.snakes.find(s => s.id === myNetId);
+    if (me) {
+      myAlive = me.alive;
+      myRespawnIn = me.respawnIn;
+      if (me.alive && me.body.length) {
+        const hx = me.body[0][0] + 0.5;
+        const hy = me.body[0][1] + 0.5;
+        const jump = Math.hypot(hx - curCam.x, hy - curCam.y) > 1.6;
+        const targetA = Math.atan2(me.dir[1], me.dir[0]);
+        const na = jump ? targetA : curAngle + normAng(targetA - curAngle);
+        prevCam = jump ? { x: hx, y: hy } : { x: curCam.x, y: curCam.y };
+        prevAngle = jump ? na : curAngle;
+        curCam = { x: hx, y: hy };
+        curAngle = na;
+      }
+      score = me.score;
+      kills = me.kills;
       if (score > best) {
         best = score;
         saveBest(best);
       }
-      updateHud();
-      placeFood();
-      speedMs = Math.max(90, speedMs - 3);
-      addFlash('ENERGY +10', '#fb923c');
-    } else {
-      snake.pop();
     }
-
-    maybeSpawnEnemy();
+    st.events.forEach(ev => {
+      if (ev.id === myNetId) {
+        if (ev.k === 'stab') { swordThrustStart = performance.now(); addFlash('SKEWERED +15', '#f87171'); }
+        else if (ev.k === 'block') { shieldFlashStart = performance.now(); addFlash('BLOCKED +5', '#67e8f9'); }
+        else if (ev.k === 'energy') addFlash('ENERGY +10', '#fb923c');
+        else if (ev.k === 'death') addFlash('DESTROYED', '#f87171');
+      } else if (ev.k === 'death') {
+        const s = st.snakes.find(x => x.id === ev.id);
+        if (s) addFlash(esc(s.name) + ' DESTROYED', '#94a3b8');
+      }
+    });
+    updateHud();
+    updateScoreboard(st);
   }
 
-  function tick() {
-    if (!running || paused) return;
-    step();
-    loopId = setTimeout(tick, speedMs);
+  function updateScoreboard(st) {
+    playersEl.innerHTML = st.snakes
+      .slice()
+      .sort((a, b) => b.score - a.score)
+      .map(s =>
+        '<span class="prow' + (s.id === myNetId ? ' me' : '') + '">' +
+        '<i style="background:' + s.color + '"></i>' +
+        esc(s.name) + ' ' + s.score + ' (' + s.kills + (s.alive ? '' : ' · resp') + ')</span>')
+      .join('');
   }
 
-  function start() {
-    reset();
-    running = true;
-    paused = false;
-    hideOverlay();
-    clearTimeout(loopId);
-    loopId = setTimeout(tick, speedMs);
-  }
-
-  function gameOver() {
-    running = false;
-    clearTimeout(loopId);
-    showOverlay('HULL BREACH', `Score: ${score}  ·  Kills: ${kills}  ·  Best: ${best}`, 'Re-engage');
-  }
-
-  function togglePause() {
-    if (!running) return;
-    paused = !paused;
-    if (paused) {
-      showOverlay('SYSTEMS PAUSED', 'Press Space to resume', 'Resume');
-    } else {
-      hideOverlay();
-      loopId = setTimeout(tick, speedMs);
-    }
-  }
-
-  // --- sprites ---
+  // ===================== SPRITES & OVERLAY =====================
 
   const foodSprite = (() => {
     const c = document.createElement('canvas');
@@ -422,8 +791,6 @@
     return c;
   })();
 
-  // --- static cockpit overlay (vignette, scanlines, crosshair, frame) ---
-
   const overlayCanvas = (() => {
     const c = document.createElement('canvas');
     c.width = W;
@@ -483,19 +850,9 @@
   floorGrad.addColorStop(0, '#141824');
   floorGrad.addColorStop(1, '#242c40');
 
-  // --- raycast renderer ---
+  // ===================== RENDERER =====================
 
-  function normAng(a) {
-    while (a > Math.PI) a -= Math.PI * 2;
-    while (a < -Math.PI) a += Math.PI * 2;
-    return a;
-  }
-
-  function lerp(a, b, t) {
-    return a + (b - a) * t;
-  }
-
-  function castRay(px, py, ang, bodySet) {
+  function castRay(px, py, ang, bodyMap) {
     const dx = Math.cos(ang), dy = Math.sin(ang);
     let mapX = Math.floor(px), mapY = Math.floor(py);
     const dX = dx === 0 ? Infinity : Math.abs(1 / dx);
@@ -509,23 +866,27 @@
     for (let i = 0; i < 64; i++) {
       if (sdX < sdY) { sdX += dX; mapX += stepX; side = 0; }
       else { sdY += dY; mapY += stepY; side = 1; }
-      let type = 0;
+      let col = null, type = 0;
       if (mapX < 0 || mapX >= COLS || mapY < 0 || mapY >= ROWS) type = 1;
-      else if (bodySet.has(mapX + ',' + mapY)) type = 2;
+      else {
+        col = bodyMap.get(mapX + ',' + mapY);
+        if (col) type = 2;
+      }
       if (type) {
         const dist = side === 0 ? sdX - dX : sdY - dY;
-        return { dist, side, type };
+        return { dist, side, type, col };
       }
     }
-    return { dist: 64, side: 0, type: 1 };
+    return { dist: 64, side: 0, type: 1, col: null };
   }
 
   function drawSprites(camX, camY, camA, zbuf, now) {
-    const items = [
-      { x: food.x + 0.5, y: food.y + 0.5, img: foodSprite, scale: 0.55, ground: false, bobSeed: 0 },
-    ];
-    enemies.forEach((e, i) => {
-      items.push({ x: e.x + 0.5, y: e.y + 0.5, img: enemySprite, scale: 0.85, ground: true, bobSeed: i + 1 });
+    const items = [];
+    stCur.foods.forEach((f, i) => {
+      items.push({ x: f[0] + 0.5, y: f[1] + 0.5, img: foodSprite, scale: 0.55, ground: false, bobSeed: i * 3 });
+    });
+    stCur.enemies.forEach((e, i) => {
+      items.push({ x: e[0] + 0.5, y: e[1] + 0.5, img: enemySprite, scale: 0.85, ground: true, bobSeed: i + 1 });
     });
     items.forEach(it => {
       const dx = it.x - camX, dy = it.y - camY;
@@ -557,7 +918,6 @@
   }
 
   function drawViewmodels(now) {
-    // shield (bottom-left)
     const flash = Math.max(0, 1 - (now - shieldFlashStart) / 400);
     ctx.save();
     ctx.translate(W * 0.12, H * 1.02 - flash * 30);
@@ -576,7 +936,7 @@
     ctx.fillStyle = sg;
     ctx.fill();
     ctx.lineWidth = 3;
-    ctx.strokeStyle = flash > 0 ? `rgba(103,232,249,${0.3 + flash * 0.7})` : '#1e293b';
+    ctx.strokeStyle = flash > 0 ? 'rgba(103,232,249,' + (0.3 + flash * 0.7) + ')' : '#1e293b';
     ctx.stroke();
     ctx.fillStyle = '#fbbf24';
     ctx.beginPath();
@@ -587,7 +947,6 @@
     ctx.stroke();
     ctx.restore();
 
-    // sword (bottom-right)
     const thrust = Math.max(0, 1 - (now - swordThrustStart) / 260);
     ctx.save();
     ctx.translate(W * 0.82 - thrust * 90, H * 1.06 - thrust * 60);
@@ -639,28 +998,38 @@
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 - 3.5, y0 - 3.5, ms + 7, ms + 7);
     ctx.fillStyle = '#fb923c';
-    ctx.fillRect(x0 + food.x * cs + 1, y0 + food.y * cs + 1, cs - 2, cs - 2);
+    stCur.foods.forEach(f => {
+      ctx.fillRect(x0 + f[0] * cs + 1, y0 + f[1] * cs + 1, cs - 2, cs - 2);
+    });
     ctx.fillStyle = '#c084fc';
-    enemies.forEach(e => {
-      ctx.fillRect(x0 + e.x * cs + 1, y0 + e.y * cs + 1, cs - 2, cs - 2);
+    stCur.enemies.forEach(e => {
+      ctx.fillRect(x0 + e[0] * cs + 1, y0 + e[1] * cs + 1, cs - 2, cs - 2);
     });
-    snake.forEach((s, i) => {
-      ctx.fillStyle = i === 0 ? '#bbf7d0' : '#4ade80';
-      ctx.fillRect(x0 + s.x * cs + 0.5, y0 + s.y * cs + 0.5, cs - 1, cs - 1);
+    let myHead = null;
+    stCur.snakes.forEach(s => {
+      if (!s.alive) return;
+      s.body.forEach((c, i) => {
+        ctx.fillStyle = i === 0 ? '#ffffff' : s.color;
+        if (i === 0 && s.id !== myNetId) ctx.fillStyle = s.color;
+        ctx.fillRect(x0 + c[0] * cs + 0.5, y0 + c[1] * cs + 0.5, cs - 1, cs - 1);
+      });
+      if (s.id === myNetId && s.body.length) myHead = s.body[0];
     });
-    const hx = x0 + (snake[0].x + 0.5) * cs;
-    const hy = y0 + (snake[0].y + 0.5) * cs;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(hx, hy);
-    ctx.lineTo(hx + Math.cos(camA) * 9, hy + Math.sin(camA) * 9);
-    ctx.stroke();
+    if (myHead) {
+      const hx = x0 + (myHead[0] + 0.5) * cs;
+      const hy = y0 + (myHead[1] + 0.5) * cs;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(hx + Math.cos(camA) * 9, hy + Math.sin(camA) * 9);
+      ctx.stroke();
+    }
   }
 
   function drawFlashes(now) {
     flashes = flashes.filter(f => now - f.start < 900);
-    flashes.forEach(f => {
+    flashes.forEach((f, idx) => {
       const p = (now - f.start) / 900;
       if (p < 0.25) {
         ctx.globalAlpha = (0.25 - p) * 0.8;
@@ -671,13 +1040,25 @@
       ctx.fillStyle = f.color;
       ctx.font = 'bold 26px "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(f.text, W / 2, H * 0.36 - p * 30);
+      ctx.fillText(f.text, W / 2, H * 0.36 - p * 30 + idx * 30);
       ctx.globalAlpha = 1;
     });
   }
 
   function render(now) {
-    const t = (!running || paused) ? 1 : Math.min(1, (now - lastTickTime) / speedMs);
+    if (!stCur) {
+      ctx.fillStyle = '#0b0e15';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#67e8f9';
+      ctx.font = '16px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(IS_HOST ? 'INITIALIZING...' : 'LINKING TO HOST...', W / 2, H / 2);
+      requestAnimationFrame(render);
+      return;
+    }
+
+    const tickMs = stCur.tickMs || TICK_MS;
+    const t = Math.min(1, (now - stateTime) / tickMs);
     const camX = lerp(prevCam.x, curCam.x, t);
     const camY = lerp(prevCam.y, curCam.y, t);
     const camA = lerp(prevAngle, curAngle, t);
@@ -693,11 +1074,20 @@
     ctx.lineTo(W, H / 2 + 0.5);
     ctx.stroke();
 
-    const bodySet = new Set(snake.slice(1).map(s => s.x + ',' + s.y));
+    const bodyMap = new Map();
+    stCur.snakes.forEach(s => {
+      if (!s.alive) return;
+      const rgb = colRgb(s.color);
+      s.body.forEach((c, i) => {
+        if (s.id === myNetId && i === 0) return;
+        bodyMap.set(c[0] + ',' + c[1], rgb);
+      });
+    });
+
     const zbuf = new Array(NUM_RAYS);
     for (let i = 0; i < NUM_RAYS; i++) {
       const rayA = camA - FOV / 2 + FOV * (i + 0.5) / NUM_RAYS;
-      const hit = castRay(camX, camY, rayA, bodySet);
+      const hit = castRay(camX, camY, rayA, bodyMap);
       const perp = Math.max(0.08, hit.dist * Math.cos(rayA - camA));
       zbuf[i] = perp;
       const h = Math.min(H * 2.2, H / perp);
@@ -705,52 +1095,92 @@
       const shade = Math.max(0.12, 1 - perp / 15) * (hit.side ? 0.75 : 1);
       let r, g, b;
       if (hit.type === 1) { r = 96; g = 116; b = 150; }
-      else { r = 70; g = 215; b = 130; }
+      else { r = hit.col[0]; g = hit.col[1]; b = hit.col[2]; }
       ctx.fillStyle = 'rgb(' + (r * shade | 0) + ',' + (g * shade | 0) + ',' + (b * shade | 0) + ')';
       ctx.fillRect(i * COLW, y0, COLW + 1, h);
     }
 
     drawSprites(camX, camY, camA, zbuf, now);
-    drawViewmodels(now);
+    if (myAlive) drawViewmodels(now);
     ctx.drawImage(overlayCanvas, 0, 0);
     drawMinimap(camA);
     drawFlashes(now);
 
+    if (!myAlive) {
+      ctx.fillStyle = 'rgba(153,27,27,0.28)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fecaca';
+      ctx.font = 'bold 30px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DESTROYED', W / 2, H / 2 - 12);
+      ctx.font = '18px "Segoe UI", sans-serif';
+      const secs = Math.max(0, Math.ceil(myRespawnIn * (stCur.tickMs || TICK_MS) / 1000));
+      ctx.fillText('Respawning in ' + secs + 's', W / 2, H / 2 + 18);
+    }
+
     requestAnimationFrame(render);
   }
 
-  // --- input ---
+  // ===================== INPUT =====================
 
   window.addEventListener('keydown', (e) => {
     if (e.key === ' ') {
       e.preventDefault();
-      if (!running) start();
-      else togglePause();
+      if (IS_HOST) {
+        if (!running) startMatch();
+        else togglePause();
+      }
       return;
     }
     if (e.key === 'r' || e.key === 'R') {
-      start();
+      if (IS_HOST && running) startMatch();
       return;
     }
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
       e.preventDefault();
-      if (running && !paused && turnQueue.length < 2) turnQueue.push('L');
+      sendTurn('L');
       return;
     }
     if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
       e.preventDefault();
-      if (running && !paused && turnQueue.length < 2) turnQueue.push('R');
+      sendTurn('R');
     }
   });
 
-  startBtn.addEventListener('click', start);
+  startBtn.addEventListener('click', () => {
+    if (IS_HOST) {
+      if (!running) startMatch();
+      else if (paused) togglePause();
+    } else {
+      location.reload();
+    }
+  });
+
+  copyBtn.addEventListener('click', () => {
+    shareInput.select();
+    navigator.clipboard.writeText(shareInput.value).then(() => {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    });
+  });
+
+  // ===================== BOOT =====================
 
   best = loadBest();
-  running = false;
-  paused = false;
-  reset();
   updateHud();
-  showOverlay('MECH SNAKE', 'Neural link ready — press Space to engage', 'Engage');
+
+  if (IS_HOST) {
+    addPlayer(HOST_ID, myName);
+    for (let i = 0; i < FOOD_COUNT; i++) placeFood();
+    spawnEnemy();
+    spawnEnemy();
+    applyState(buildState([]));
+    showOverlay('MECH SNAKE ONLINE', 'You are hosting — share the invite link, then press Space to engage', 'Engage');
+    initHostNet();
+  } else {
+    initGuestNet();
+  }
+
   requestAnimationFrame(render);
 })();
 </script>

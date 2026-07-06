@@ -2,17 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Snake</title>
+<title>Mech Snake</title>
 <style>
   :root {
     --bg: #0f1117;
     --board: #1a1d29;
     --grid: #23273a;
-    --snake: #4ade80;
-    --snake-head: #86efac;
-    --food: #f87171;
     --text: #e5e7eb;
-    --accent: #60a5fa;
+    --accent: #67e8f9;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -27,13 +24,14 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: 14px;
     padding: 16px;
   }
   h1 {
     margin: 0;
     font-size: 1.5rem;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.18em;
+    color: var(--accent);
   }
   #hud {
     display: flex;
@@ -44,12 +42,12 @@
   #board-wrap {
     position: relative;
   }
-  canvas {
-    background: var(--board);
+  canvas#game {
+    background: #0b0e15;
     border: 2px solid var(--grid);
     border-radius: 8px;
-    image-rendering: pixelated;
     display: block;
+    max-width: 100%;
   }
   #overlay {
     position: absolute;
@@ -65,7 +63,7 @@
     padding: 16px;
   }
   #overlay.show { display: flex; }
-  #overlay h2 { margin: 0; font-size: 1.4rem; }
+  #overlay h2 { margin: 0; font-size: 1.4rem; letter-spacing: 0.1em; }
   #overlay p { margin: 0; color: #9ca3af; font-size: 0.9rem; }
   button {
     background: var(--accent);
@@ -82,25 +80,27 @@
     color: #6b7280;
     font-size: 0.85rem;
     text-align: center;
+    max-width: 640px;
   }
 </style>
 </head>
 <body>
-  <h1>SNAKE</h1>
+  <h1>MECH SNAKE</h1>
   <div id="hud">
     <div>Score: <span id="score">0</span></div>
     <div>Kills: <span id="kills">0</span></div>
     <div>Best: <span id="best">0</span></div>
   </div>
   <div id="board-wrap">
-    <canvas id="game" width="400" height="400"></canvas>
+    <canvas id="game" width="640" height="400"></canvas>
     <div id="overlay" class="show">
-      <h2 id="overlay-title">Snake</h2>
-      <p id="overlay-msg">Press Space or tap Start to play</p>
-      <button id="start-btn">Start</button>
+      <h2 id="overlay-title">MECH SNAKE</h2>
+      <p id="overlay-msg">Neural link ready — press Space to engage</p>
+      <button id="start-btn">Engage</button>
     </div>
   </div>
-  <p id="hint">Arrow keys / WASD to move &middot; Space to pause &middot; R to restart<br>Charge into enemies to stab them &middot; let them bump your tail and the shield blocks them from behind</p>
+  <p id="hint">&larr; &rarr; or A/D to steer &middot; forward is automatic &middot; Space to pause &middot; R to restart<br>
+  Stab drones head-on with the sword &middot; your rear shield blocks pursuers &middot; don't let them touch your hull</p>
 
 <script>
 (function () {
@@ -114,15 +114,18 @@
   const overlayMsg = document.getElementById('overlay-msg');
   const startBtn = document.getElementById('start-btn');
 
-  const CELL = 20;
-  const COLS = canvas.width / CELL;
-  const ROWS = canvas.height / CELL;
+  const W = canvas.width, H = canvas.height;
+  const COLS = 20, ROWS = 20;
+  const FOV = Math.PI / 3;
+  const NUM_RAYS = 320;
+  const COLW = W / NUM_RAYS;
   const BEST_KEY = 'snake-best-score';
   const ENEMY_MAX = 5;
-  const EFFECT_TTL = 6;
 
-  let snake, dir, nextDir, food, score, best, kills, running, paused, loopId, speedMs;
-  let enemies, effects, enemyTickCounter;
+  let snake, dir, food, score, best, kills, running, paused, loopId, speedMs;
+  let enemies, enemyTickCounter, turnQueue;
+  let prevCam, curCam, prevAngle, curAngle, lastTickTime;
+  let flashes, swordThrustStart, shieldFlashStart;
 
   function loadBest() {
     return parseInt(localStorage.getItem(BEST_KEY) || '0', 10);
@@ -143,7 +146,8 @@
     let cell;
     do {
       cell = randomCell();
-    } while (snake.some(s => s.x === cell.x && s.y === cell.y));
+    } while (snake.some(s => s.x === cell.x && s.y === cell.y) ||
+             enemies.some(e => e.x === cell.x && e.y === cell.y));
     food = cell;
   }
 
@@ -154,13 +158,20 @@
       { x: Math.floor(COLS / 2) - 2, y: Math.floor(ROWS / 2) },
     ];
     dir = { x: 1, y: 0 };
-    nextDir = dir;
+    turnQueue = [];
     score = 0;
     kills = 0;
-    speedMs = 110;
+    speedMs = 170;
     enemies = [];
-    effects = [];
     enemyTickCounter = 0;
+    flashes = [];
+    swordThrustStart = -1e9;
+    shieldFlashStart = -1e9;
+    curCam = { x: snake[0].x + 0.5, y: snake[0].y + 0.5 };
+    prevCam = { x: curCam.x, y: curCam.y };
+    curAngle = Math.atan2(dir.y, dir.x);
+    prevAngle = curAngle;
+    lastTickTime = performance.now();
     placeFood();
     spawnEnemy();
     spawnEnemy();
@@ -176,7 +187,7 @@
   function showOverlay(title, msg, btnLabel) {
     overlayTitle.textContent = title;
     overlayMsg.textContent = msg;
-    startBtn.textContent = btnLabel || 'Start';
+    startBtn.textContent = btnLabel || 'Engage';
     overlay.classList.add('show');
   }
 
@@ -184,134 +195,24 @@
     overlay.classList.remove('show');
   }
 
-  function draw() {
-    ctx.fillStyle = '#1a1d29';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.strokeStyle = '#23273a';
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= COLS; x++) {
-      ctx.beginPath();
-      ctx.moveTo(x * CELL + 0.5, 0);
-      ctx.lineTo(x * CELL + 0.5, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = 0; y <= ROWS; y++) {
-      ctx.beginPath();
-      ctx.moveTo(0, y * CELL + 0.5);
-      ctx.lineTo(canvas.width, y * CELL + 0.5);
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = '#f87171';
-    roundRect(food.x * CELL + 2, food.y * CELL + 2, CELL - 4, CELL - 4, 4);
-    ctx.fill();
-
-    drawEnemies();
-
-    snake.forEach((seg, i) => {
-      ctx.fillStyle = i === 0 ? '#86efac' : '#4ade80';
-      roundRect(seg.x * CELL + 1, seg.y * CELL + 1, CELL - 2, CELL - 2, 5);
-      ctx.fill();
-    });
-
-    drawSword();
-    drawShield();
-    drawEffects();
+  function addFlash(text, color) {
+    flashes.push({ text, color, start: performance.now() });
   }
 
-  function drawEnemies() {
-    enemies.forEach(e => {
-      const cx = e.x * CELL + CELL / 2;
-      const cy = e.y * CELL + CELL / 2;
-      ctx.save();
-      ctx.translate(cx, cy);
-
-      ctx.fillStyle = '#a855f7';
-      for (let i = 0; i < 8; i++) {
-        const a = (Math.PI * 2 / 8) * i;
-        const x1 = Math.cos(a) * CELL * 0.38, y1 = Math.sin(a) * CELL * 0.38;
-        const x2 = Math.cos(a) * CELL * 0.58, y2 = Math.sin(a) * CELL * 0.58;
-        const a2 = a + 0.26;
-        const x3 = Math.cos(a2) * CELL * 0.3, y3 = Math.sin(a2) * CELL * 0.3;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.lineTo(x3, y3);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      ctx.fillStyle = '#c084fc';
-      ctx.beginPath();
-      ctx.arc(0, 0, CELL * 0.36, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(-4, -1, 2.2, 0, Math.PI * 2);
-      ctx.arc(4, -1, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#1f2937';
-      ctx.beginPath();
-      ctx.arc(-4, -1, 1, 0, Math.PI * 2);
-      ctx.arc(4, -1, 1, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.restore();
-    });
-  }
-
-  function drawEffects() {
-    effects.forEach(fx => {
-      const alpha = Math.max(0, fx.ttl / EFFECT_TTL);
-      const cx = fx.x * CELL + CELL / 2;
-      const cy = fx.y * CELL + CELL / 2;
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      if (fx.type === 'stab') {
-        ctx.strokeStyle = '#f87171';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(cx - 10, cy - 10);
-        ctx.lineTo(cx + 10, cy + 10);
-        ctx.moveTo(cx + 10, cy - 10);
-        ctx.lineTo(cx - 10, cy + 10);
-        ctx.stroke();
-      } else {
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 8 + (1 - alpha) * 8, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-    });
-  }
-
-  function spawnEffect(x, y, type) {
-    effects.push({ x, y, type, ttl: EFFECT_TTL });
-  }
-
-  function updateEffects() {
-    effects.forEach(fx => fx.ttl--);
-    effects = effects.filter(fx => fx.ttl > 0);
-  }
+  // --- enemies ---
 
   function spawnEnemy() {
-    let cell = null;
     for (let i = 0; i < 30; i++) {
-      const candidate = randomCell();
-      const farEnough = !snake || Math.abs(candidate.x - snake[0].x) + Math.abs(candidate.y - snake[0].y) >= 6;
-      const free = (!snake || !snake.some(s => s.x === candidate.x && s.y === candidate.y)) &&
-        (!food || candidate.x !== food.x || candidate.y !== food.y) &&
-        !enemies.some(e => e.x === candidate.x && e.y === candidate.y);
+      const c = randomCell();
+      const farEnough = Math.abs(c.x - snake[0].x) + Math.abs(c.y - snake[0].y) >= 6;
+      const free = !snake.some(s => s.x === c.x && s.y === c.y) &&
+        (!food || c.x !== food.x || c.y !== food.y) &&
+        !enemies.some(e => e.x === c.x && e.y === c.y);
       if (farEnough && free) {
-        cell = candidate;
-        break;
+        enemies.push({ x: c.x, y: c.y });
+        return;
       }
     }
-    if (cell) enemies.push({ x: cell.x, y: cell.y });
   }
 
   function maybeSpawnEnemy() {
@@ -353,13 +254,15 @@
       if (e.x === headPos.x && e.y === headPos.y) {
         score += 15;
         kills++;
-        spawnEffect(e.x, e.y, 'stab');
+        swordThrustStart = performance.now();
+        addFlash('SKEWERED +15', '#f87171');
         continue;
       }
       if (e.x === backCell.x && e.y === backCell.y) {
         score += 5;
         kills++;
-        spawnEffect(e.x, e.y, 'block');
+        shieldFlashStart = performance.now();
+        addFlash('BLOCKED +5', '#67e8f9');
         continue;
       }
       if (snake.some((s, i) => i > 0 && s.x === e.x && s.y === e.y)) {
@@ -376,118 +279,16 @@
     updateHud();
   }
 
-  function drawShield() {
-    const head = snake[0];
-    const cx = head.x * CELL + CELL / 2;
-    const cy = head.y * CELL + CELL / 2;
-    const angle = Math.atan2(dir.y, dir.x);
-    const sx = -CELL * 0.75;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(angle);
-
-    ctx.beginPath();
-    ctx.moveTo(sx - 8, -10);
-    ctx.lineTo(sx + 8, -10);
-    ctx.quadraticCurveTo(sx + 9, -2, sx + 8, 4);
-    ctx.quadraticCurveTo(sx, 15, sx - 8, 4);
-    ctx.quadraticCurveTo(sx - 9, -2, sx - 8, -10);
-    ctx.closePath();
-
-    const grad = ctx.createLinearGradient(sx - 8, -10, sx + 8, 10);
-    grad.addColorStop(0, '#cbd5e1');
-    grad.addColorStop(0.5, '#94a3b8');
-    grad.addColorStop(1, '#64748b');
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // cross rivets
-    ctx.strokeStyle = 'rgba(51,65,85,0.6)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(sx - 6, -3);
-    ctx.lineTo(sx + 6, -3);
-    ctx.stroke();
-
-    // emblem boss
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath();
-    ctx.arc(sx, -3, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#b45309';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  function drawSword() {
-    const head = snake[0];
-    const cx = head.x * CELL + CELL / 2;
-    const cy = head.y * CELL + CELL / 2;
-    const angle = Math.atan2(dir.y, dir.x);
-    const bladeLen = CELL * 2.6;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(angle);
-
-    // blade
-    const bladeStart = CELL * 0.35;
-    const grad = ctx.createLinearGradient(bladeStart, 0, bladeLen, 0);
-    grad.addColorStop(0, '#e5e7eb');
-    grad.addColorStop(1, '#f9fafb');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(bladeStart, -3.5);
-    ctx.lineTo(bladeLen - 10, -3.5);
-    ctx.lineTo(bladeLen, 0);
-    ctx.lineTo(bladeLen - 10, 3.5);
-    ctx.lineTo(bladeStart, 3.5);
-    ctx.closePath();
-    ctx.fill();
-
-    // blood groove (fuller)
-    ctx.strokeStyle = 'rgba(107,114,128,0.6)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(bladeStart + 2, 0);
-    ctx.lineTo(bladeLen - 12, 0);
-    ctx.stroke();
-
-    // crossguard
-    ctx.fillStyle = '#d97706';
-    ctx.fillRect(bladeStart - 4, -9, 5, 18);
-
-    // handle
-    ctx.fillStyle = '#78350f';
-    ctx.fillRect(bladeStart - 13, -3, 9, 6);
-
-    // pommel
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath();
-    ctx.arc(bladeStart - 15, 0, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
+  // --- game loop ---
 
   function step() {
-    dir = nextDir;
+    prevAngle = curAngle;
+    prevCam = { x: curCam.x, y: curCam.y };
+
+    const turn = turnQueue.shift();
+    if (turn === 'L') { dir = { x: dir.y, y: -dir.x }; curAngle -= Math.PI / 2; }
+    else if (turn === 'R') { dir = { x: -dir.y, y: dir.x }; curAngle += Math.PI / 2; }
+
     const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
 
     if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS ||
@@ -497,6 +298,8 @@
     }
 
     snake.unshift(head);
+    curCam = { x: head.x + 0.5, y: head.y + 0.5 };
+    lastTickTime = performance.now();
 
     enemyTickCounter++;
     if (enemyTickCounter % 2 === 0) {
@@ -514,14 +317,13 @@
       }
       updateHud();
       placeFood();
-      speedMs = Math.max(60, speedMs - 2);
+      speedMs = Math.max(90, speedMs - 3);
+      addFlash('ENERGY +10', '#fb923c');
     } else {
       snake.pop();
     }
 
     maybeSpawnEnemy();
-    updateEffects();
-    draw();
   }
 
   function tick() {
@@ -536,33 +338,388 @@
     paused = false;
     hideOverlay();
     clearTimeout(loopId);
-    draw();
     loopId = setTimeout(tick, speedMs);
   }
 
   function gameOver() {
     running = false;
     clearTimeout(loopId);
-    showOverlay('Game Over', `Score: ${score}  ·  Best: ${best}`, 'Play Again');
+    showOverlay('HULL BREACH', `Score: ${score}  ·  Kills: ${kills}  ·  Best: ${best}`, 'Re-engage');
   }
 
   function togglePause() {
     if (!running) return;
     paused = !paused;
     if (paused) {
-      showOverlay('Paused', 'Press Space to resume', 'Resume');
+      showOverlay('SYSTEMS PAUSED', 'Press Space to resume', 'Resume');
     } else {
       hideOverlay();
       loopId = setTimeout(tick, speedMs);
     }
   }
 
-  const KEY_DIRS = {
-    ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
-    ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 }, S: { x: 0, y: 1 },
-    ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 }, A: { x: -1, y: 0 },
-    ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
-  };
+  // --- sprites ---
+
+  const foodSprite = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(32, 32, 4, 32, 32, 28);
+    rg.addColorStop(0, '#fff7ed');
+    rg.addColorStop(0.35, '#fb923c');
+    rg.addColorStop(0.8, 'rgba(239,68,68,0.9)');
+    rg.addColorStop(1, 'rgba(239,68,68,0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, 64, 64);
+    g.strokeStyle = 'rgba(254,215,170,0.9)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(32, 32, 12, 0, Math.PI * 2);
+    g.stroke();
+    return c;
+  })();
+
+  const enemySprite = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.translate(32, 34);
+    g.fillStyle = '#6d28d9';
+    for (let i = 0; i < 8; i++) {
+      const a = Math.PI * 2 / 8 * i;
+      g.beginPath();
+      g.moveTo(Math.cos(a) * 16, Math.sin(a) * 16);
+      g.lineTo(Math.cos(a) * 27, Math.sin(a) * 27);
+      g.lineTo(Math.cos(a + 0.32) * 13, Math.sin(a + 0.32) * 13);
+      g.closePath();
+      g.fill();
+    }
+    const bg = g.createRadialGradient(-6, -8, 3, 0, 0, 20);
+    bg.addColorStop(0, '#c084fc');
+    bg.addColorStop(1, '#7c3aed');
+    g.fillStyle = bg;
+    g.beginPath();
+    g.arc(0, 0, 18, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#4c1d95';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(0, 0, 18, 0, Math.PI * 2);
+    g.stroke();
+    g.fillStyle = '#1e1b4b';
+    g.fillRect(-12, -6, 24, 9);
+    g.fillStyle = '#f87171';
+    g.beginPath(); g.arc(-6, -1.5, 3, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(6, -1.5, 3, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fecaca';
+    g.beginPath(); g.arc(-6.8, -2.2, 1, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(5.2, -2.2, 1, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#a78bfa';
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, -18); g.lineTo(0, -26); g.stroke();
+    g.fillStyle = '#f87171';
+    g.beginPath(); g.arc(0, -27, 2.5, 0, Math.PI * 2); g.fill();
+    return c;
+  })();
+
+  // --- static cockpit overlay (vignette, scanlines, crosshair, frame) ---
+
+  const overlayCanvas = (() => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const o = c.getContext('2d');
+
+    o.fillStyle = 'rgba(0,0,0,0.10)';
+    for (let y = 0; y < H; y += 4) o.fillRect(0, y, W, 1);
+
+    const vg = o.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(2,4,10,0.55)');
+    o.fillStyle = vg;
+    o.fillRect(0, 0, W, H);
+
+    o.strokeStyle = 'rgba(103,232,249,0.85)';
+    o.lineWidth = 1.5;
+    o.beginPath();
+    o.moveTo(W / 2 - 12, H / 2); o.lineTo(W / 2 - 4, H / 2);
+    o.moveTo(W / 2 + 4, H / 2); o.lineTo(W / 2 + 12, H / 2);
+    o.moveTo(W / 2, H / 2 - 12); o.lineTo(W / 2, H / 2 - 4);
+    o.moveTo(W / 2, H / 2 + 4); o.lineTo(W / 2, H / 2 + 12);
+    o.stroke();
+    o.beginPath();
+    o.arc(W / 2, H / 2, 2, 0, Math.PI * 2);
+    o.stroke();
+
+    o.strokeStyle = 'rgba(103,232,249,0.35)';
+    o.lineWidth = 2;
+    const L = 26, p = 10;
+    o.beginPath();
+    o.moveTo(p, p + L); o.lineTo(p, p); o.lineTo(p + L, p);
+    o.moveTo(W - p - L, p); o.lineTo(W - p, p); o.lineTo(W - p, p + L);
+    o.moveTo(p, H - p - L); o.lineTo(p, H - p); o.lineTo(p + L, H - p);
+    o.moveTo(W - p - L, H - p); o.lineTo(W - p, H - p); o.lineTo(W - p, H - p - L);
+    o.stroke();
+
+    const dg = o.createLinearGradient(0, H - 42, 0, H);
+    dg.addColorStop(0, 'rgba(8,11,18,0)');
+    dg.addColorStop(0.4, 'rgba(8,11,18,0.85)');
+    dg.addColorStop(1, 'rgba(8,11,18,0.95)');
+    o.fillStyle = dg;
+    o.fillRect(0, H - 42, W, 42);
+    ['#4ade80', '#fbbf24', '#67e8f9'].forEach((col, i) => {
+      o.fillStyle = col;
+      o.beginPath();
+      o.arc(W / 2 - 30 + i * 30, H - 16, 4, 0, Math.PI * 2);
+      o.fill();
+    });
+    return c;
+  })();
+
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H / 2);
+  skyGrad.addColorStop(0, '#0a0d14');
+  skyGrad.addColorStop(1, '#161b28');
+  const floorGrad = ctx.createLinearGradient(0, H / 2, 0, H);
+  floorGrad.addColorStop(0, '#141824');
+  floorGrad.addColorStop(1, '#242c40');
+
+  // --- raycast renderer ---
+
+  function normAng(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function castRay(px, py, ang, bodySet) {
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    let mapX = Math.floor(px), mapY = Math.floor(py);
+    const dX = dx === 0 ? Infinity : Math.abs(1 / dx);
+    const dY = dy === 0 ? Infinity : Math.abs(1 / dy);
+    let stepX, sdX, stepY, sdY;
+    if (dx < 0) { stepX = -1; sdX = (px - mapX) * dX; }
+    else { stepX = 1; sdX = (mapX + 1 - px) * dX; }
+    if (dy < 0) { stepY = -1; sdY = (py - mapY) * dY; }
+    else { stepY = 1; sdY = (mapY + 1 - py) * dY; }
+    let side = 0;
+    for (let i = 0; i < 64; i++) {
+      if (sdX < sdY) { sdX += dX; mapX += stepX; side = 0; }
+      else { sdY += dY; mapY += stepY; side = 1; }
+      let type = 0;
+      if (mapX < 0 || mapX >= COLS || mapY < 0 || mapY >= ROWS) type = 1;
+      else if (bodySet.has(mapX + ',' + mapY)) type = 2;
+      if (type) {
+        const dist = side === 0 ? sdX - dX : sdY - dY;
+        return { dist, side, type };
+      }
+    }
+    return { dist: 64, side: 0, type: 1 };
+  }
+
+  function drawSprites(camX, camY, camA, zbuf, now) {
+    const items = [
+      { x: food.x + 0.5, y: food.y + 0.5, img: foodSprite, scale: 0.55, ground: false, bobSeed: 0 },
+    ];
+    enemies.forEach((e, i) => {
+      items.push({ x: e.x + 0.5, y: e.y + 0.5, img: enemySprite, scale: 0.85, ground: true, bobSeed: i + 1 });
+    });
+    items.forEach(it => {
+      const dx = it.x - camX, dy = it.y - camY;
+      it.dist = Math.hypot(dx, dy);
+      it.relA = normAng(Math.atan2(dy, dx) - camA);
+    });
+    items.sort((a, b) => b.dist - a.dist);
+    const tanH = Math.tan(FOV / 2);
+    items.forEach(it => {
+      if (Math.abs(it.relA) > FOV / 2 + 0.5) return;
+      const perp = it.dist * Math.cos(it.relA);
+      if (perp < 0.25) return;
+      const size = (H * it.scale) / perp;
+      const sx = W / 2 * (1 + Math.tan(it.relA) / tanH);
+      const bob = Math.sin(now / 260 + it.bobSeed * 2.1) * size * 0.05;
+      const top = it.ground
+        ? H / 2 + (H / 2) / perp - size + bob
+        : H / 2 - size / 2 + bob;
+      const left = sx - size / 2;
+      const cStart = Math.max(0, Math.floor(left));
+      const cEnd = Math.min(W, left + size);
+      for (let c = cStart; c < cEnd; c++) {
+        const col = Math.floor(c / COLW);
+        if (col < 0 || col >= NUM_RAYS || zbuf[col] <= perp) continue;
+        const u = ((c - left) / size) * 64;
+        ctx.drawImage(it.img, u, 0, Math.max(64 / size, 0.5), 64, c, top, 1, size);
+      }
+    });
+  }
+
+  function drawViewmodels(now) {
+    // shield (bottom-left)
+    const flash = Math.max(0, 1 - (now - shieldFlashStart) / 400);
+    ctx.save();
+    ctx.translate(W * 0.12, H * 1.02 - flash * 30);
+    const sw = W * 0.30, sh = H * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-sw / 2, -sh * 0.85);
+    ctx.lineTo(sw / 2, -sh * 0.85);
+    ctx.quadraticCurveTo(sw * 0.6, -sh * 0.25, sw * 0.4, sh * 0.15);
+    ctx.quadraticCurveTo(0, sh * 0.55, -sw * 0.4, sh * 0.15);
+    ctx.quadraticCurveTo(-sw * 0.6, -sh * 0.25, -sw / 2, -sh * 0.85);
+    ctx.closePath();
+    const sg = ctx.createLinearGradient(-sw / 2, -sh, sw / 2, sh * 0.4);
+    sg.addColorStop(0, '#94a3b8');
+    sg.addColorStop(0.5, '#64748b');
+    sg.addColorStop(1, '#334155');
+    ctx.fillStyle = sg;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = flash > 0 ? `rgba(103,232,249,${0.3 + flash * 0.7})` : '#1e293b';
+    ctx.stroke();
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.arc(0, -sh * 0.3, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#b45309';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // sword (bottom-right)
+    const thrust = Math.max(0, 1 - (now - swordThrustStart) / 260);
+    ctx.save();
+    ctx.translate(W * 0.82 - thrust * 90, H * 1.06 - thrust * 60);
+    ctx.rotate(-0.8 - thrust * 0.2);
+    const len = H * 0.78, wid = 22;
+    const bgrad = ctx.createLinearGradient(-wid, 0, wid, 0);
+    bgrad.addColorStop(0, '#9aa4b2');
+    bgrad.addColorStop(0.5, '#eef2f7');
+    bgrad.addColorStop(1, '#7b8494');
+    ctx.fillStyle = bgrad;
+    ctx.beginPath();
+    ctx.moveTo(-wid / 2, 0);
+    ctx.lineTo(-wid / 2, -len + 40);
+    ctx.lineTo(0, -len);
+    ctx.lineTo(wid / 2, -len + 40);
+    ctx.lineTo(wid / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90,100,115,0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(0, -len + 46);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(103,232,249,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-wid / 2, 0);
+    ctx.lineTo(-wid / 2, -len + 40);
+    ctx.lineTo(0, -len);
+    ctx.stroke();
+    ctx.fillStyle = '#d97706';
+    ctx.fillRect(-32, -2, 64, 12);
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(-8, 10, 16, 34);
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.arc(0, 48, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawMinimap(camA) {
+    const ms = 116, pad = 12, cs = ms / COLS;
+    const x0 = W - ms - pad, y0 = pad;
+    ctx.fillStyle = 'rgba(8,11,18,0.72)';
+    ctx.fillRect(x0 - 3, y0 - 3, ms + 6, ms + 6);
+    ctx.strokeStyle = 'rgba(103,232,249,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 - 3.5, y0 - 3.5, ms + 7, ms + 7);
+    ctx.fillStyle = '#fb923c';
+    ctx.fillRect(x0 + food.x * cs + 1, y0 + food.y * cs + 1, cs - 2, cs - 2);
+    ctx.fillStyle = '#c084fc';
+    enemies.forEach(e => {
+      ctx.fillRect(x0 + e.x * cs + 1, y0 + e.y * cs + 1, cs - 2, cs - 2);
+    });
+    snake.forEach((s, i) => {
+      ctx.fillStyle = i === 0 ? '#bbf7d0' : '#4ade80';
+      ctx.fillRect(x0 + s.x * cs + 0.5, y0 + s.y * cs + 0.5, cs - 1, cs - 1);
+    });
+    const hx = x0 + (snake[0].x + 0.5) * cs;
+    const hy = y0 + (snake[0].y + 0.5) * cs;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(hx, hy);
+    ctx.lineTo(hx + Math.cos(camA) * 9, hy + Math.sin(camA) * 9);
+    ctx.stroke();
+  }
+
+  function drawFlashes(now) {
+    flashes = flashes.filter(f => now - f.start < 900);
+    flashes.forEach(f => {
+      const p = (now - f.start) / 900;
+      if (p < 0.25) {
+        ctx.globalAlpha = (0.25 - p) * 0.8;
+        ctx.fillStyle = f.color;
+        ctx.fillRect(0, 0, W, H);
+      }
+      ctx.globalAlpha = 1 - p;
+      ctx.fillStyle = f.color;
+      ctx.font = 'bold 26px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(f.text, W / 2, H * 0.36 - p * 30);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function render(now) {
+    const t = (!running || paused) ? 1 : Math.min(1, (now - lastTickTime) / speedMs);
+    const camX = lerp(prevCam.x, curCam.x, t);
+    const camY = lerp(prevCam.y, curCam.y, t);
+    const camA = lerp(prevAngle, curAngle, t);
+
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H / 2);
+    ctx.fillStyle = floorGrad;
+    ctx.fillRect(0, H / 2, W, H / 2);
+    ctx.strokeStyle = 'rgba(103,232,249,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, H / 2 + 0.5);
+    ctx.lineTo(W, H / 2 + 0.5);
+    ctx.stroke();
+
+    const bodySet = new Set(snake.slice(1).map(s => s.x + ',' + s.y));
+    const zbuf = new Array(NUM_RAYS);
+    for (let i = 0; i < NUM_RAYS; i++) {
+      const rayA = camA - FOV / 2 + FOV * (i + 0.5) / NUM_RAYS;
+      const hit = castRay(camX, camY, rayA, bodySet);
+      const perp = Math.max(0.08, hit.dist * Math.cos(rayA - camA));
+      zbuf[i] = perp;
+      const h = Math.min(H * 2.2, H / perp);
+      const y0 = (H - h) / 2;
+      const shade = Math.max(0.12, 1 - perp / 15) * (hit.side ? 0.75 : 1);
+      let r, g, b;
+      if (hit.type === 1) { r = 96; g = 116; b = 150; }
+      else { r = 70; g = 215; b = 130; }
+      ctx.fillStyle = 'rgb(' + (r * shade | 0) + ',' + (g * shade | 0) + ',' + (b * shade | 0) + ')';
+      ctx.fillRect(i * COLW, y0, COLW + 1, h);
+    }
+
+    drawSprites(camX, camY, camA, zbuf, now);
+    drawViewmodels(now);
+    ctx.drawImage(overlayCanvas, 0, 0);
+    drawMinimap(camA);
+    drawFlashes(now);
+
+    requestAnimationFrame(render);
+  }
+
+  // --- input ---
 
   window.addEventListener('keydown', (e) => {
     if (e.key === ' ') {
@@ -575,19 +732,26 @@
       start();
       return;
     }
-    const d = KEY_DIRS[e.key];
-    if (!d || !running || paused) return;
-    if (d.x === -dir.x && d.y === -dir.y) return;
-    nextDir = d;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+      e.preventDefault();
+      if (running && !paused && turnQueue.length < 2) turnQueue.push('L');
+      return;
+    }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      e.preventDefault();
+      if (running && !paused && turnQueue.length < 2) turnQueue.push('R');
+    }
   });
 
   startBtn.addEventListener('click', start);
 
   best = loadBest();
+  running = false;
+  paused = false;
   reset();
-  draw();
   updateHud();
-  showOverlay('Snake', 'Press Space or tap Start to play', 'Start');
+  showOverlay('MECH SNAKE', 'Neural link ready — press Space to engage', 'Engage');
+  requestAnimationFrame(render);
 })();
 </script>
 </body>
